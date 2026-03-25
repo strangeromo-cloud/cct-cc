@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm -v)",
+      "Bash(curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh)",
+      "Bash(bash)",
+      "Bash(export NVM_DIR=\"$HOME/.nvm\")",
+      "Bash(. \"$NVM_DIR/nvm.sh\")",
+      "Bash(npm create:*)",
+      "Bash(export NVM_DIR=$HOME/.nvm)",
+      "Bash(. $NVM_DIR/nvm.sh)",
+      "Bash(cp -r /Users/cloud/Documents/cct-temp/* /Users/cloud/Documents/cct/)",
+      "Bash(cp /Users/cloud/Documents/cct-temp/.gitignore /Users/cloud/Documents/cct/)",
+      "Bash(rm -rf /Users/cloud/Documents/cct-temp)",
+      "Bash(npm install:*)",
+      "Bash(npx shadcn@latest init -d)"
+    ]
+  }
+}
