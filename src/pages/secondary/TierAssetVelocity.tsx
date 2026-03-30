@@ -3,6 +3,7 @@ import { useLanguage } from '@/hooks/useLanguage';
 import { formatCurrency } from '@/utils/formatters';
 import { KPICard } from '@/components/charts/KPICard';
 import { BaseChart } from '@/components/charts/BaseChart';
+import { AlignedDataTable } from '@/components/charts/AlignedDataTable';
 import { ChartTitle } from '@/components/charts/ChartTitle';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import type { EChartsOption } from 'echarts';
@@ -83,6 +84,13 @@ export function TierAssetVelocity({ data, thresholds }: TierAssetVelocityProps) 
         </CardHeader>
         <CardContent className="pb-3">
           <BaseChart option={woiOption} height="240px" />
+          <AlignedDataTable
+            columns={periods}
+            rows={[
+              { label: `WOI (${t.days})`, cells: data.map((d) => <span className={`font-semibold ${d.woiIdg >= thresholds.woiDanger ? 'text-lenovo-red' : ''}`}>{d.woiIdg}</span>), labelClass: 'text-foreground' },
+              { label: t.metricInventory, cells: data.map((d) => formatCurrency(d.inventory)) },
+            ]}
+          />
         </CardContent>
       </Card>
 
@@ -105,6 +113,12 @@ export function TierAssetVelocity({ data, thresholds }: TierAssetVelocityProps) 
           </CardHeader>
           <CardContent className="pb-3">
             <BaseChart option={invOption} height="180px" />
+            <AlignedDataTable
+              columns={periods}
+              rows={[
+                { label: t.metricInventory, cells: data.map((d) => <span className="font-semibold">{formatCurrency(d.inventory)}</span>), labelClass: 'text-foreground' },
+              ]}
+            />
           </CardContent>
         </Card>
       </div>

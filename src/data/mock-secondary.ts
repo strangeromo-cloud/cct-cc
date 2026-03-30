@@ -19,7 +19,7 @@ export function getSecondaryData(filters: FilterState): OperatingMetrics[] {
   const idx = QUARTERS.indexOf(periodToQuarter(filters.quarter));
   const startIdx = Math.max(0, idx - 4);
   const quarters = QUARTERS.slice(startIdx, idx + 1);
-  const bgFactor = (filters.selectedBGs.length || 4) / 4;
+  const bgFactor = (filters.selectedBGs.length || 3) / 3;
   const geoFactor = (filters.selectedGeos.length || 6) / 6;
   const scale = bgFactor * geoFactor;
 
@@ -48,7 +48,7 @@ export function getWaterfallData(filters: FilterState): WaterfallStep[] {
   const idx = QUARTERS.indexOf(periodToQuarter(filters.quarter));
   const q = QUARTERS[idx] ?? 'FY25Q3';
   const d = baseData[q] ?? baseData.FY25Q3;
-  const bgFactor = (filters.selectedBGs.length || 4) / 4;
+  const bgFactor = (filters.selectedBGs.length || 3) / 3;
   const geoFactor = (filters.selectedGeos.length || 6) / 6;
   const scale = bgFactor * geoFactor;
 
@@ -78,7 +78,7 @@ export function getBudgetData(filters: FilterState): BudgetData[] {
   const idx = QUARTERS.indexOf(periodToQuarter(filters.quarter));
   const startIdx = Math.max(0, idx - 4);
   const quarters = QUARTERS.slice(startIdx, idx + 1);
-  const bgFactor = (filters.selectedBGs.length || 4) / 4;
+  const bgFactor = (filters.selectedBGs.length || 3) / 3;
   const geoFactor = (filters.selectedGeos.length || 6) / 6;
   const scale = bgFactor * geoFactor;
 

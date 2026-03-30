@@ -3,6 +3,7 @@ import { useLanguage } from '@/hooks/useLanguage';
 import { formatCurrency } from '@/utils/formatters';
 import { KPICard } from '@/components/charts/KPICard';
 import { BaseChart } from '@/components/charts/BaseChart';
+import { AlignedDataTable } from '@/components/charts/AlignedDataTable';
 import { ChartTitle } from '@/components/charts/ChartTitle';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import type { EChartsOption } from 'echarts';
@@ -91,6 +92,15 @@ export function TierCashFlow({ data, thresholds }: TierCashFlowProps) {
         </CardHeader>
         <CardContent className="pb-3">
           <BaseChart option={chartOption} height="280px" />
+          <AlignedDataTable
+            columns={periods}
+            gridRight={60}
+            rows={[
+              { label: t.metricAR, cells: data.map((d) => formatCurrency(d.ar)), labelClass: 'text-foreground' },
+              { label: t.metricAP, cells: data.map((d) => formatCurrency(d.ap)) },
+              { label: `CCC (${t.days})`, cells: data.map((d) => <span className={`font-semibold ${d.cccUnfunded >= thresholds.cccDanger ? 'text-lenovo-red' : ''}`}>{d.cccUnfunded}</span>), labelClass: 'text-foreground' },
+            ]}
+          />
         </CardContent>
       </Card>
 

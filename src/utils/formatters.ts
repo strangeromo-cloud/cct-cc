@@ -1,8 +1,9 @@
 export function formatCurrency(value: number): string {
   const abs = Math.abs(value);
   const sign = value < 0 ? '-' : '';
-  if (abs >= 1e9) return `${sign}$${(abs / 1e9).toFixed(1)}B`;
-  if (abs >= 1e6) return `${sign}$${(abs / 1e6).toFixed(0)}M`;
+  const m = abs / 1e6;
+  if (m >= 1000) return `${sign}$${m.toLocaleString('en-US', { maximumFractionDigits: 0 })}M`;
+  if (m >= 1) return `${sign}$${m.toLocaleString('en-US', { maximumFractionDigits: 0 })}M`;
   if (abs >= 1e3) return `${sign}$${(abs / 1e3).toFixed(0)}K`;
   return `${sign}$${abs.toFixed(0)}`;
 }
@@ -14,9 +15,9 @@ export function formatPercent(value: number): string {
 export function formatCompact(value: number): string {
   const abs = Math.abs(value);
   const sign = value < 0 ? '-' : '';
-  if (abs >= 1e9) return `${sign}${(abs / 1e9).toFixed(1)}B`;
-  if (abs >= 1e6) return `${sign}${(abs / 1e6).toFixed(0)}M`;
-  if (abs >= 1e3) return `${sign}${(abs / 1e3).toFixed(1)}K`;
+  const m = abs / 1e6;
+  if (m >= 1) return `${sign}${m.toLocaleString('en-US', { maximumFractionDigits: 0 })}M`;
+  if (abs >= 1e3) return `${sign}${(abs / 1e3).toFixed(0)}K`;
   return `${sign}${abs.toFixed(0)}`;
 }
 

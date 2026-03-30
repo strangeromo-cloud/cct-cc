@@ -31,7 +31,7 @@ const baseMetrics: Record<string, { rev: number; gp: number; gpPct: number; oi: 
 export function getOpeningData(filters: FilterState): QuarterlyMetrics {
   const q = periodToQuarter(filters.quarter);
   const base = baseMetrics[q] ?? baseMetrics.FY25Q3;
-  const bgFactor = (filters.selectedBGs.length || 4) / 4;
+  const bgFactor = (filters.selectedBGs.length || 3) / 3;
   const geoFactor = (filters.selectedGeos.length || 6) / 6;
   const scale = bgFactor * geoFactor;
 
@@ -92,7 +92,7 @@ export interface ProfitWaterfallItem {
 export function getProfitabilityWaterfall(filters: FilterState): ProfitWaterfallItem[] {
   const q = periodToQuarter(filters.quarter);
   const base = baseMetrics[q] ?? baseMetrics.FY25Q3;
-  const bgFactor = (filters.selectedBGs.length || 4) / 4;
+  const bgFactor = (filters.selectedBGs.length || 3) / 3;
   const geoFactor = (filters.selectedGeos.length || 6) / 6;
   const scale = bgFactor * geoFactor;
 
@@ -138,7 +138,7 @@ export function getOpeningTrendData(filters: FilterState): { quarters: string[];
   const idx = QUARTERS.indexOf(periodToQuarter(filters.quarter));
   const startIdx = Math.max(0, idx - 4);
   const quarters = QUARTERS.slice(startIdx, idx + 1);
-  const bgFactor = (filters.selectedBGs.length || 4) / 4;
+  const bgFactor = (filters.selectedBGs.length || 3) / 3;
   const geoFactor = (filters.selectedGeos.length || 6) / 6;
   const scale = bgFactor * geoFactor;
 
@@ -179,7 +179,7 @@ export function getMetricTrends(filters: FilterState): MetricTrendData[] {
   const idx = QUARTERS.indexOf(periodToQuarter(filters.quarter));
   const startIdx = Math.max(0, idx - 4);
   const quarters = QUARTERS.slice(startIdx, idx + 1);
-  const bgFactor = (filters.selectedBGs.length || 4) / 4;
+  const bgFactor = (filters.selectedBGs.length || 3) / 3;
   const geoFactor = (filters.selectedGeos.length || 6) / 6;
   const scale = bgFactor * geoFactor;
 

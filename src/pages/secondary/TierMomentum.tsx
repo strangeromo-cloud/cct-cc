@@ -3,6 +3,7 @@ import { useLanguage } from '@/hooks/useLanguage';
 import { formatCurrency, formatMultiple } from '@/utils/formatters';
 import { KPICard } from '@/components/charts/KPICard';
 import { TrendLineChart } from '@/components/charts/TrendLineChart';
+import { AlignedDataTable } from '@/components/charts/AlignedDataTable';
 import { ChartTitle } from '@/components/charts/ChartTitle';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
@@ -39,6 +40,14 @@ export function TierMomentum({ data, thresholds }: TierMomentumProps) {
               { name: t.metricBacklog, data: data.map((d) => d.backlog), color: '#00A650' },
             ]}
             height="220px"
+          />
+          <AlignedDataTable
+            columns={periods}
+            rows={[
+              { label: t.metricPipeline, cells: data.map((d) => <span className="font-semibold">{formatCurrency(d.pipeline)}</span>), labelClass: 'text-foreground' },
+              { label: t.metricBacklog, cells: data.map((d) => <span>{formatCurrency(d.backlog)}</span>) },
+              { label: t.coverageRatio, cells: data.map((d) => <span className="font-semibold">{formatMultiple(d.revenues > 0 ? d.pipeline / d.revenues : 0)}</span>), labelClass: 'text-foreground' },
+            ]}
           />
         </CardContent>
       </Card>

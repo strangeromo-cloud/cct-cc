@@ -48,6 +48,7 @@ export interface Translations {
   workingCapitalTrend: string;
   fullOperatingMetrics: string;
   days: string;
+  total: string;
 
   // Secondary Page - 4 Tier Sections
   tierForwardMomentum: string;
@@ -88,12 +89,18 @@ export interface Translations {
   bgPerformanceComparison: string;
   bgComparison: string;
   opIncome: string;
+  bgGPMarginTrend: string;
+  bgOIMarginComparison: string;
+  geoRevHeatmap: string;
+  geoProfitabilityComparison: string;
 
   // AI Chat
   aiChatTitle: string;
   aiChatPlaceholder: string;
   aiChatWelcome: string;
   aiChatHint: string;
+  aiClearChat: string;
+  aiFollowUp: string;
 
   // Suggested queries
   suggestGP: string;

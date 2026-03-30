@@ -1,12 +1,9 @@
 import { NavLink } from 'react-router-dom';
-import { useContext } from 'react';
-import { ChatContext } from '@/context/ChatContext';
 import { useLanguage } from '@/hooks/useLanguage';
-import { MessageSquare, Globe } from 'lucide-react';
+import { Globe } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 export function Header() {
-  const { isOpen, setIsOpen } = useContext(ChatContext);
   const { language, t, toggleLanguage } = useLanguage();
 
   const navItems = [
@@ -50,15 +47,6 @@ export function Header() {
         >
           <Globe className="h-4 w-4" />
           {language === 'en' ? '中文' : 'EN'}
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setIsOpen(!isOpen)}
-          className="text-white/70 hover:text-white hover:bg-white/10"
-        >
-          <MessageSquare className="h-4 w-4 mr-1.5" />
-          {t.aiAssistant}
         </Button>
       </div>
     </header>

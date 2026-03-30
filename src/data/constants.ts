@@ -1,6 +1,6 @@
 import type { BusinessGroup, Geography, TimeGranularity } from '@/types';
 
-export const BUSINESS_GROUPS: BusinessGroup[] = ['PCSD', 'MBG', 'ISG', 'SSG'];
+export const BUSINESS_GROUPS: BusinessGroup[] = ['IDG', 'ISG', 'SSG'];
 
 export const GEOGRAPHIES: Geography[] = ['AP', 'NA', 'LA', 'Europe', 'Meta', 'PRC'];
 
@@ -15,11 +15,9 @@ export const QUARTERS = [
 export const CURRENT_QUARTER = QUARTERS[QUARTERS.length - 1];
 
 export const BG_COLORS: Record<string, string> = {
-  PCSD: '#E12726',
-  MBG: '#F5A623',
+  IDG: '#E12726',
   ISG: '#0073CE',
   SSG: '#00A650',
-  IDG: '#E12726',
 };
 
 export const GEO_COLORS: Record<Geography, string> = {

@@ -8,6 +8,7 @@ import { formatCurrency, formatPercent } from '@/utils/formatters';
 import { KPICard } from '@/components/charts/KPICard';
 import { MetricTabbedChart } from '@/components/charts/MetricTabbedChart';
 import { TrendLineChart } from '@/components/charts/TrendLineChart';
+import { AlignedDataTable } from '@/components/charts/AlignedDataTable';
 import { ChartTitle } from '@/components/charts/ChartTitle';
 import { BaseChart } from '@/components/charts/BaseChart';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -147,6 +148,22 @@ export function OpeningPage() {
   // Margin trend data: GP%, OI%, Net% over 5 quarters
   const marginTrendLabel = language === 'zh' ? '利润率趋势' : 'Margin Trends';
 
+  const gpPctSeries = trend.quarters.map((_, i) => {
+    const rev = trend.series.revenues[i];
+    const gp = trend.series.grossProfit[i];
+    return rev > 0 ? Math.round(gp / rev * 1000) / 10 : 0;
+  });
+  const oiPctSeries = trend.quarters.map((_, i) => {
+    const rev = trend.series.revenues[i];
+    const oi = trend.series.operatingIncome[i];
+    return rev > 0 ? Math.round(oi / rev * 1000) / 10 : 0;
+  });
+  const netPctSeries = trend.quarters.map((_, i) => {
+    const rev = trend.series.revenues[i];
+    const ni = trend.series.netIncome[i];
+    return rev > 0 ? Math.round(ni / rev * 1000) / 10 : 0;
+  });
+
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold text-foreground">
@@ -181,6 +198,24 @@ export function OpeningPage() {
         </CardHeader>
         <CardContent>
           <BaseChart option={waterfallOption} height="300px" />
+          <AlignedDataTable
+            columns={profitWaterfall.map((s) => s.name)}
+            rows={[
+              {
+                label: language === 'zh' ? '金额' : 'Amount',
+                cells: profitWaterfall.map((s) => (
+                  <span className={`font-semibold ${s.type === 'negative' ? 'text-lenovo-red' : ''}`}>
+                    {formatCurrency(s.value)}
+                  </span>
+                )),
+                labelClass: 'text-foreground',
+              },
+              {
+                label: language === 'zh' ? '利润率' : 'Margin',
+                cells: profitWaterfall.map((s) => s.margin || '—'),
+              },
+            ]}
+          />
           <ChangeAnnotations steps={profitWaterfall} language={language} />
         </CardContent>
       </Card>
@@ -197,36 +232,20 @@ export function OpeningPage() {
             <TrendLineChart
               xData={trend.quarters}
               series={[
-                {
-                  name: 'GP%',
-                  data: trend.quarters.map((_, i) => {
-                    const rev = trend.series.revenues[i];
-                    const gp = trend.series.grossProfit[i];
-                    return rev > 0 ? Math.round(gp / rev * 1000) / 10 : 0;
-                  }),
-                  color: '#0073CE',
-                },
-                {
-                  name: 'OI%',
-                  data: trend.quarters.map((_, i) => {
-                    const rev = trend.series.revenues[i];
-                    const oi = trend.series.operatingIncome[i];
-                    return rev > 0 ? Math.round(oi / rev * 1000) / 10 : 0;
-                  }),
-                  color: '#00A650',
-                },
-                {
-                  name: 'Net%',
-                  data: trend.quarters.map((_, i) => {
-                    const rev = trend.series.revenues[i];
-                    const ni = trend.series.netIncome[i];
-                    return rev > 0 ? Math.round(ni / rev * 1000) / 10 : 0;
-                  }),
-                  color: '#F5A623',
-                },
+                { name: 'GP%', data: gpPctSeries, color: '#0073CE' },
+                { name: 'OI%', data: oiPctSeries, color: '#00A650' },
+                { name: 'Net%', data: netPctSeries, color: '#F5A623' },
               ]}
               yAxisFormatter={(v) => `${v}%`}
               height="280px"
+            />
+            <AlignedDataTable
+              columns={trend.quarters}
+              rows={[
+                { label: 'GP%', cells: gpPctSeries.map((v) => `${v}%`), labelClass: 'text-foreground' },
+                { label: 'OI%', cells: oiPctSeries.map((v) => `${v}%`) },
+                { label: 'Net%', cells: netPctSeries.map((v) => `${v}%`) },
+              ]}
             />
           </CardContent>
         </Card>
@@ -244,6 +263,13 @@ export function OpeningPage() {
                 { name: t.consensus, data: trend.series.consensus, color: '#F5A623' },
               ]}
               height="280px"
+            />
+            <AlignedDataTable
+              columns={trend.quarters}
+              rows={[
+                { label: t.revenue, cells: trend.series.revenues.map((v) => formatCurrency(v)), labelClass: 'text-foreground' },
+                { label: t.consensus, cells: trend.series.consensus.map((v) => formatCurrency(v)) },
+              ]}
             />
           </CardContent>
         </Card>

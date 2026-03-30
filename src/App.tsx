@@ -4,6 +4,7 @@ import { ChatProvider } from '@/context/ChatContext';
 import { LanguageProvider } from '@/context/LanguageContext';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { ChatPanel } from '@/components/ai-chat/ChatPanel';
+import { ChatFAB } from '@/components/ai-chat/ChatFAB';
 import { OpeningPage } from '@/pages/opening/OpeningPage';
 import { SecondaryPage } from '@/pages/secondary/SecondaryPage';
 import { TertiaryPage } from '@/pages/tertiary/TertiaryPage';
@@ -21,6 +22,7 @@ function App() {
               <Route path="bg-breakdown" element={<TertiaryPage />} />
             </Route>
           </Routes>
+          <ChatFAB />
           <ChatPanel />
         </BrowserRouter>
       </ChatProvider>

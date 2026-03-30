@@ -7,10 +7,15 @@ interface GroupedBarChartProps {
   series: { name: string; data: number[]; color?: string }[];
   title?: string;
   height?: string;
+  yAxisFormatter?: (v: number) => string;
+  tooltipFormatter?: (v: number) => string;
   onChartClick?: (params: Record<string, unknown>) => void;
 }
 
-export function GroupedBarChart({ categories, series, title, height, onChartClick }: GroupedBarChartProps) {
+export function GroupedBarChart({ categories, series, title, height, yAxisFormatter, tooltipFormatter, onChartClick }: GroupedBarChartProps) {
+  const fmtVal = tooltipFormatter ?? formatCurrency;
+  const fmtAxis = yAxisFormatter ?? ((v: number) => formatCurrency(v));
+
   const option: EChartsOption = {
     title: title ? { text: title, left: 'left', textStyle: { fontSize: 13, fontWeight: 600, color: '#333' } } : undefined,
     tooltip: {
@@ -20,14 +25,14 @@ export function GroupedBarChart({ categories, series, title, height, onChartClic
         const items = params as Array<{ seriesName: string; value: number; color: string; axisValue?: string }>;
         let html = `<div style="font-size:12px"><strong>${items[0]?.axisValue ?? ''}</strong>`;
         for (const item of items) {
-          html += `<br/><span style="color:${item.color}">●</span> ${item.seriesName}: ${formatCurrency(item.value)}`;
+          html += `<br/><span style="color:${item.color}">●</span> ${item.seriesName}: ${fmtVal(item.value)}`;
         }
         return html + '</div>';
       },
     },
     legend: { top: 5, right: 0, textStyle: { fontSize: 11 } },
     xAxis: { type: 'category', data: categories, axisLabel: { fontSize: 11 } },
-    yAxis: { type: 'value', axisLabel: { fontSize: 11, formatter: (v: number) => formatCurrency(v) } },
+    yAxis: { type: 'value', axisLabel: { fontSize: 11, formatter: (v: number) => fmtAxis(v) } },
     series: series.map((s) => ({
       name: s.name,
       type: 'bar' as const,

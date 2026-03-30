@@ -16,9 +16,22 @@ function quarterGrowth(q: string): number {
   return 1 + idx * 0.02;
 }
 
+/** Expand filter BGs to raw data BGs (IDG → PCSD + MBG) */
+function expandBGs(bgs: string[]): string[] {
+  const raw: string[] = [];
+  for (const bg of bgs) {
+    if (bg === 'IDG') {
+      raw.push('PCSD', 'MBG');
+    } else {
+      raw.push(bg);
+    }
+  }
+  return raw;
+}
+
 export function getTertiaryData(filters: FilterState): BGBreakdown[] {
   const results: BGBreakdown[] = [];
-  const bgs = filters.selectedBGs;
+  const bgs = expandBGs(filters.selectedBGs as string[]);
   const geos = filters.selectedGeos;
   const idx = QUARTERS.indexOf(periodToQuarter(filters.quarter));
   const startIdx = Math.max(0, idx - 4);
@@ -32,7 +45,7 @@ export function getTertiaryData(filters: FilterState): BGBreakdown[] {
         if (!base) continue;
         const rev = Math.round(base.rev * growth * M);
         results.push({
-          bg,
+          bg: bg as BGBreakdown['bg'],
           geo,
           period: q,
           revenues: rev,

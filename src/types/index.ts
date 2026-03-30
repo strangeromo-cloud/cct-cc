@@ -2,7 +2,7 @@ import type { EChartsOption } from 'echarts';
 
 export type TimeGranularity = 'daily' | 'monthly' | 'quarterly';
 
-export type BusinessGroup = 'PCSD' | 'MBG' | 'ISG' | 'SSG';
+export type BusinessGroup = 'IDG' | 'ISG' | 'SSG';
 
 export type Geography = 'AP' | 'NA' | 'LA' | 'Europe' | 'Meta' | 'PRC';
 
@@ -49,7 +49,7 @@ export interface OperatingMetrics {
 }
 
 export interface BGBreakdown {
-  bg: BusinessGroup | 'IDG';
+  bg: BusinessGroup | 'PCSD' | 'MBG';
   geo: Geography;
   period: string;
   revenues: number;

@@ -1,9 +1,10 @@
 import type { OperatingMetrics, WaterfallStep, BudgetData, ExpenseRatios } from '@/types';
 import { useLanguage } from '@/hooks/useLanguage';
-import { formatPercent } from '@/utils/formatters';
+import { formatCurrency, formatPercent } from '@/utils/formatters';
 import { WaterfallChart } from '@/components/charts/WaterfallChart';
 import { StackedBarChart } from '@/components/charts/StackedBarChart';
 import { TrendLineChart } from '@/components/charts/TrendLineChart';
+import { AlignedDataTable } from '@/components/charts/AlignedDataTable';
 import { ChartTitle } from '@/components/charts/ChartTitle';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
@@ -53,6 +54,15 @@ export function TierProfitability({ data, waterfall, budgetData, expenseRatios }
             ]}
             height="260px"
           />
+          <AlignedDataTable
+            columns={periods}
+            rows={[
+              { label: t.metricSMExpense, cells: data.map((d) => formatCurrency(d.smExpense)), labelClass: 'text-foreground' },
+              { label: t.metricRDExpense, cells: data.map((d) => formatCurrency(d.rdExpense)) },
+              { label: t.metricFixedExpense, cells: data.map((d) => formatCurrency(d.fixedExpense)) },
+              { label: t.total ?? 'Total', cells: data.map((d) => <span className="font-semibold">{formatCurrency(d.smExpense + d.rdExpense + d.fixedExpense)}</span>), labelClass: 'text-foreground' },
+            ]}
+          />
         </CardContent>
       </Card>
 
@@ -72,6 +82,14 @@ export function TierProfitability({ data, waterfall, budgetData, expenseRatios }
             ]}
             yAxisFormatter={(v) => formatPercent(v)}
             height="260px"
+          />
+          <AlignedDataTable
+            columns={expenseRatios.periods}
+            rows={[
+              { label: 'S&M / Rev', cells: expenseRatios.smPct.map((v) => formatPercent(v)), labelClass: 'text-foreground' },
+              { label: 'R&D / Rev', cells: expenseRatios.rdPct.map((v) => formatPercent(v)) },
+              { label: 'Fixed / Rev', cells: expenseRatios.fixedPct.map((v) => formatPercent(v)) },
+            ]}
           />
         </CardContent>
       </Card>
