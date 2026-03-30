@@ -156,7 +156,14 @@ The AI assistant (built in Phases 1-5) supports:
 ### AI Chat Architecture
 - `useAIChat` hook reads `VITE_AI_MODE` to switch between frontend engine and backend API.
 - Backend is a **ReAct Agent** (Reasoning + Acting) with up to 3 rounds of tool-calling loop.
-- Backend uses OpenAI Function Calling: LLM decides which data tools to call → `mock_data.py` returns data → LLM analyzes and responds with structured JSON blocks.
+- Backend uses OpenAI Function Calling with 6 data tools:
+  - `get_quarterly_overview` — Quarter KPIs (revenue, GP, OI, NI, budget, prior year)
+  - `get_operating_data` — Operating metrics time series (pipeline, backlog, COGS, expenses, inventory, WOI, AR, AP, CCC)
+  - `get_bg_breakdown` — BG × Geo cross-dimensional data
+  - `get_supply_chain_data` — Supply chain (10 suppliers, 6 component cost trends, risk assessment)
+  - `get_peer_data` — Peer benchmarking (9 competitors, 3 market segments, market share)
+  - `get_macro_data` — Macro economics (GDP, PMI, IT spending, consumer confidence, FX impact)
+- LLM decides which tools to call → `mock_data.py` returns data → LLM analyzes and responds with structured JSON blocks.
 - SSE streaming: tool calls are non-streaming (emit `thinking` events), final answer is streamed via `sse-starlette`.
 - ThinkingBlock: shows LLM's reasoning steps in real-time (expanded during thinking, auto-collapsed on complete).
 - ChatPanel: resizable width (drag left edge, 380–900px), no backdrop blur overlay.

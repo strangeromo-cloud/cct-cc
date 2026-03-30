@@ -7,9 +7,13 @@ import json
 from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 from main import app
-from mock_data import get_opening_data, get_secondary_data, get_tertiary_data, QUARTERS, BUSINESS_GROUPS, GEOGRAPHIES
+from mock_data import (
+    get_opening_data, get_secondary_data, get_tertiary_data,
+    get_supply_chain_data, get_peer_data, get_macro_data,
+    QUARTERS, BUSINESS_GROUPS, GEOGRAPHIES,
+)
 from models import FilterState
-from llm_agent import _execute_tool, _parse_response, SYSTEM_PROMPT
+from llm_agent import _execute_tool, _parse_response, SYSTEM_PROMPT, TOOLS
 
 client = TestClient(app)
 
@@ -120,6 +124,64 @@ class TestMockData:
         data = get_opening_data(filters)
         assert data.revenues.budget > data.revenues.actual
 
+    def test_supply_chain_has_suppliers(self):
+        filters = FilterState(quarter="FY26Q1", selectedBGs=[], selectedGeos=[])
+        data = get_supply_chain_data(filters)
+        assert "suppliers" in data
+        assert len(data["suppliers"]) == 10
+        supplier = data["suppliers"][0]
+        assert "name" in supplier
+        assert "leadTimeDays" in supplier
+        assert "riskLevel" in supplier
+        assert "category" in supplier
+
+    def test_supply_chain_has_component_costs(self):
+        filters = FilterState(quarter="FY26Q1", selectedBGs=[], selectedGeos=[])
+        data = get_supply_chain_data(filters)
+        assert "componentCosts" in data
+        assert len(data["componentCosts"]) == 6
+        comp = data["componentCosts"][0]
+        assert "component" in comp
+        assert "quarters" in comp
+        assert isinstance(comp["quarters"], list)
+
+    def test_peer_data_has_companies(self):
+        filters = FilterState(quarter="FY26Q1", selectedBGs=[], selectedGeos=[])
+        data = get_peer_data(filters)
+        assert "companies" in data
+        assert len(data["companies"]) >= 6
+        comp = data["companies"][0]
+        assert "name" in comp
+        assert "marketShare" in comp
+        assert "matchesBG" in comp
+
+    def test_peer_data_has_markets(self):
+        filters = FilterState(quarter="FY26Q1", selectedBGs=[], selectedGeos=[])
+        data = get_peer_data(filters)
+        assert "markets" in data
+        assert len(data["markets"]) == 3
+        seg = data["markets"][0]
+        assert "segment" in seg
+        assert "lenovoShare" in seg
+
+    def test_macro_data_has_indicators(self):
+        filters = FilterState(quarter="FY26Q1", selectedBGs=[], selectedGeos=[])
+        data = get_macro_data(filters)
+        assert "indicators" in data
+        assert len(data["indicators"]) >= 10
+        ind = data["indicators"][0]
+        assert "name" in ind
+        assert "impactOnLenovo" in ind
+
+    def test_macro_data_has_currency_impact(self):
+        filters = FilterState(quarter="FY26Q1", selectedBGs=[], selectedGeos=[])
+        data = get_macro_data(filters)
+        assert "currencyImpact" in data
+        assert len(data["currencyImpact"]) == 4
+        fx = data["currencyImpact"][0]
+        assert "pair" in fx
+        assert "revenueImpactM" in fx
+
 
 # ── Tool Execution ──────────────────────────────────────────────────
 class TestToolExecution:
@@ -140,6 +202,43 @@ class TestToolExecution:
         parsed = json.loads(result)
         assert isinstance(parsed, list)
         assert len(parsed) > 0
+
+    def test_get_supply_chain_data(self):
+        result = _execute_tool("get_supply_chain_data", {"quarter": "FY26Q1"})
+        parsed = json.loads(result)
+        assert "suppliers" in parsed
+        assert "componentCosts" in parsed
+        assert "summary" in parsed
+
+    def test_get_supply_chain_data_with_category(self):
+        result = _execute_tool("get_supply_chain_data", {"quarter": "FY26Q1", "category": "display"})
+        parsed = json.loads(result)
+        assert "suppliers" in parsed
+        assert len(parsed["suppliers"]) > 0
+
+    def test_get_peer_data(self):
+        result = _execute_tool("get_peer_data", {"quarter": "FY26Q1"})
+        parsed = json.loads(result)
+        assert "companies" in parsed
+        assert "markets" in parsed
+        assert len(parsed["companies"]) > 0
+
+    def test_get_peer_data_with_segment(self):
+        result = _execute_tool("get_peer_data", {"quarter": "FY26Q1", "segment": "PC"})
+        parsed = json.loads(result)
+        assert "companies" in parsed
+
+    def test_get_macro_data(self):
+        result = _execute_tool("get_macro_data", {"quarter": "FY26Q1"})
+        parsed = json.loads(result)
+        assert "indicators" in parsed
+        assert "currencyImpact" in parsed
+        assert len(parsed["indicators"]) > 0
+
+    def test_get_macro_data_with_region(self):
+        result = _execute_tool("get_macro_data", {"quarter": "FY26Q1", "region": "PRC"})
+        parsed = json.loads(result)
+        assert "indicators" in parsed
 
     def test_unknown_tool(self):
         result = _execute_tool("nonexistent", {})
@@ -165,6 +264,25 @@ class TestResponseParsing:
         result = _parse_response(content)
         assert result["text"] == content
         assert result["blocks"][0]["type"] == "text"
+
+
+# ── Tool Definitions ───────────────────────────────────────────────
+class TestToolDefinitions:
+    def test_all_six_tools_defined(self):
+        tool_names = [t["function"]["name"] for t in TOOLS]
+        expected = [
+            "get_quarterly_overview", "get_operating_data", "get_bg_breakdown",
+            "get_supply_chain_data", "get_peer_data", "get_macro_data",
+        ]
+        for name in expected:
+            assert name in tool_names, f"Tool '{name}' missing from TOOLS"
+
+    def test_external_tools_have_descriptions(self):
+        external = ["get_supply_chain_data", "get_peer_data", "get_macro_data"]
+        for tool in TOOLS:
+            if tool["function"]["name"] in external:
+                assert len(tool["function"]["description"]) > 10
+                assert "properties" in tool["function"]["parameters"]
 
 
 # ── System Prompt Guardrails ────────────────────────────────────────

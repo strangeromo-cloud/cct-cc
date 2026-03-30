@@ -12,6 +12,7 @@ from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
 from models import FilterState, ChatTurn, MessageBlock
 from mock_data import (
     get_opening_data, get_secondary_data, get_tertiary_data,
+    get_supply_chain_data, get_peer_data, get_macro_data,
     QUARTERS, BUSINESS_GROUPS, GEOGRAPHIES,
 )
 
@@ -114,6 +115,54 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_supply_chain_data",
+            "description": "获取供应链数据：主要供应商信息（交期、价格指数、风险等级）、6 类关键组件的价格趋势、供应链整体风险概览。用于回答供应链风险、组件成本、供应商交期等问题。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "quarter": {"type": "string", "description": "季度，如 FY26Q1"},
+                    "selectedBGs": {"type": "array", "items": {"type": "string"}, "description": "按 BG 筛选相关供应商，空数组=全部"},
+                    "selectedGeos": {"type": "array", "items": {"type": "string"}, "description": "地区筛选"},
+                },
+                "required": ["quarter"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_peer_data",
+            "description": "获取同行对标数据：9 家竞争对手的季度营收、增速、毛利率、经营利润率、市场份额，以及 3 个市场细分（PC、Server、IT Services）的市场规模和份额排名。用于回答竞争格局、市场份额、同行对比等问题。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "quarter": {"type": "string", "description": "季度"},
+                    "selectedBGs": {"type": "array", "items": {"type": "string"}, "description": "按 BG 筛选对应赛道的竞对，空数组=全部"},
+                    "selectedGeos": {"type": "array", "items": {"type": "string"}, "description": "地区筛选"},
+                },
+                "required": ["quarter"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_macro_data",
+            "description": "获取宏观经济数据：10 项指标（GDP、PMI、IT 支出增速、消费信心、通胀、AI 基础设施指数）按地区区分，4 对主要汇率及对联想营收的影响金额（$M），IT 支出预测时间序列。用于回答宏观经济影响、汇率变化影响、行业趋势等问题。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "quarter": {"type": "string", "description": "截至季度"},
+                    "selectedBGs": {"type": "array", "items": {"type": "string"}, "description": "按 BG 筛选相关宏观指标，空数组=全部"},
+                    "selectedGeos": {"type": "array", "items": {"type": "string"}, "description": "地区筛选"},
+                },
+                "required": ["quarter"],
+            },
+        },
+    },
 ]
 
 
@@ -137,6 +186,18 @@ def _execute_tool(name: str, arguments: dict) -> str:
     elif name == "get_bg_breakdown":
         rows = get_tertiary_data(filters)
         return json.dumps([r.model_dump() for r in rows])
+
+    elif name == "get_supply_chain_data":
+        data = get_supply_chain_data(filters)
+        return json.dumps(data)
+
+    elif name == "get_peer_data":
+        data = get_peer_data(filters)
+        return json.dumps(data)
+
+    elif name == "get_macro_data":
+        data = get_macro_data(filters)
+        return json.dumps(data)
 
     return json.dumps({"error": f"Unknown tool: {name}"})
 
@@ -352,5 +413,8 @@ def _tool_thinking_text(fn_name: str, fn_args: dict) -> str:
         "get_quarterly_overview": f"查询季度总览数据{scope}",
         "get_operating_data": f"查询运营指标时间序列{scope}",
         "get_bg_breakdown": f"查询 BG × 地区交叉数据{scope}",
+        "get_supply_chain_data": f"查询供应链数据（供应商、组件成本、风险）{scope}",
+        "get_peer_data": f"查询同行对标数据（竞对财务、市场份额）{scope}",
+        "get_macro_data": f"查询宏观经济数据（GDP、汇率、IT支出）{scope}",
     }
     return tool_labels.get(fn_name, f"调用工具 {fn_name}{scope}")

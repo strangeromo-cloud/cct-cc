@@ -1,5 +1,5 @@
 """
-Mock data — mirrors frontend mock-opening / mock-secondary / mock-tertiary.
+Mock data — mirrors frontend mock-opening / mock-secondary / mock-tertiary / mock-external.
 When connecting to real databases, replace these functions with actual queries.
 """
 from __future__ import annotations
@@ -136,3 +136,154 @@ def get_tertiary_data(filters: FilterState) -> list[BGBreakdown]:
                 operatingIncome=oi,
             ))
     return rows
+
+
+# ── Supply Chain Data ───────────────────────────────────────────────
+_suppliers = [
+    {"name": "Intel", "category": "CPU", "leadTimeDays": 28, "leadTimeChange": -3, "priceIndex": 95, "priceIndexChange": -2.1, "riskLevel": "low", "affectedBGs": ["IDG", "ISG"], "region": "NA"},
+    {"name": "AMD", "category": "CPU/GPU", "leadTimeDays": 32, "leadTimeChange": -2, "priceIndex": 102, "priceIndexChange": 1.5, "riskLevel": "low", "affectedBGs": ["IDG", "ISG"], "region": "NA"},
+    {"name": "NVIDIA", "category": "GPU/AI Accelerator", "leadTimeDays": 45, "leadTimeChange": 5, "priceIndex": 118, "priceIndexChange": 8.2, "riskLevel": "high", "affectedBGs": ["ISG", "SSG"], "region": "NA"},
+    {"name": "Samsung", "category": "Memory/SSD", "leadTimeDays": 21, "leadTimeChange": -1, "priceIndex": 112, "priceIndexChange": 6.3, "riskLevel": "medium", "affectedBGs": ["IDG", "ISG"], "region": "AP"},
+    {"name": "SK Hynix", "category": "Memory/HBM", "leadTimeDays": 25, "leadTimeChange": 3, "priceIndex": 125, "priceIndexChange": 12.5, "riskLevel": "high", "affectedBGs": ["ISG"], "region": "AP"},
+    {"name": "TSMC", "category": "Foundry", "leadTimeDays": 56, "leadTimeChange": -8, "priceIndex": 105, "priceIndexChange": 2.0, "riskLevel": "medium", "affectedBGs": ["IDG", "ISG", "SSG"], "region": "AP"},
+    {"name": "BOE", "category": "Display Panel", "leadTimeDays": 18, "leadTimeChange": -2, "priceIndex": 88, "priceIndexChange": -5.4, "riskLevel": "low", "affectedBGs": ["IDG"], "region": "PRC"},
+    {"name": "LG Display", "category": "Display Panel", "leadTimeDays": 22, "leadTimeChange": 0, "priceIndex": 92, "priceIndexChange": -3.1, "riskLevel": "low", "affectedBGs": ["IDG"], "region": "AP"},
+    {"name": "Foxconn", "category": "Assembly/ODM", "leadTimeDays": 14, "leadTimeChange": -1, "priceIndex": 103, "priceIndexChange": 1.8, "riskLevel": "low", "affectedBGs": ["IDG"], "region": "PRC"},
+    {"name": "Broadcom", "category": "Networking", "leadTimeDays": 35, "leadTimeChange": 2, "priceIndex": 108, "priceIndexChange": 3.5, "riskLevel": "medium", "affectedBGs": ["ISG"], "region": "NA"},
+]
+
+_component_price_series = {
+    "CPU (x86)":          [100, 98, 96, 95, 94, 93, 95, 96, 95],
+    "GPU/AI Accelerator": [100, 102, 108, 112, 115, 118, 122, 125, 118],
+    "DRAM":               [100, 95, 92, 98, 105, 108, 112, 115, 112],
+    "NAND/SSD":           [100, 96, 90, 88, 92, 96, 100, 104, 100],
+    "Display Panel":      [100, 98, 95, 92, 90, 88, 86, 85, 88],
+    "HBM":                [100, 105, 112, 120, 128, 135, 140, 145, 125],
+}
+
+
+def get_supply_chain_data(filters: FilterState) -> dict:
+    """Supply chain: suppliers, component cost trends, summary."""
+    q = _period_to_quarter(filters.quarter)
+    qi = QUARTERS.index(q) if q in QUARTERS else 8
+    bg_filter = filters.selectedBGs
+
+    suppliers = [s for s in _suppliers]
+    if bg_filter:
+        suppliers = [s for s in suppliers if any(bg in bg_filter for bg in s["affectedBGs"])]
+
+    # Vary slightly by quarter
+    suppliers = [{**s,
+        "leadTimeDays": s["leadTimeDays"] + round((qi - 8) * 0.5),
+        "priceIndex": s["priceIndex"] + round((qi - 8) * 0.3),
+    } for s in suppliers]
+
+    # Component cost trends
+    start = max(0, qi - 4)
+    quarters = QUARTERS[start:qi + 1]
+    component_costs = []
+    for comp, series in _component_price_series.items():
+        component_costs.append({
+            "component": comp,
+            "quarters": quarters,
+            "priceIndex": [series[start + i] if (start + i) < len(series) else 100 for i in range(len(quarters))],
+        })
+
+    # Summary
+    avg_lead = round(sum(s["leadTimeDays"] for s in suppliers) / len(suppliers)) if suppliers else 0
+    avg_lead_chg = round(sum(s["leadTimeChange"] for s in suppliers) / len(suppliers), 1) if suppliers else 0
+    high_risk = sum(1 for s in suppliers if s["riskLevel"] == "high")
+    avg_cost = round(sum(s["priceIndex"] for s in suppliers) / len(suppliers)) if suppliers else 100
+    avg_cost_chg = round(sum(s["priceIndexChange"] for s in suppliers) / len(suppliers), 1) if suppliers else 0
+
+    return {
+        "suppliers": suppliers,
+        "componentCosts": component_costs,
+        "summary": {
+            "avgLeadTimeDays": avg_lead,
+            "avgLeadTimeChange": avg_lead_chg,
+            "highRiskCount": high_risk,
+            "overallCostIndex": avg_cost,
+            "overallCostChange": avg_cost_chg,
+        },
+    }
+
+
+# ── Peer / Competitor Data ──────────────────────────────────────────
+_peers = [
+    {"name": "HP Inc.", "segment": "PC", "matchesBG": "IDG", "quarterlyRevenue": 13800, "revenueGrowthYoY": 3.2, "grossMargin": 21.5, "operatingMargin": 8.8, "marketShare": 20.8, "marketShareChange": -0.5},
+    {"name": "Dell Technologies", "segment": "PC", "matchesBG": "IDG", "quarterlyRevenue": 12200, "revenueGrowthYoY": 2.8, "grossMargin": 22.0, "operatingMargin": 6.5, "marketShare": 16.2, "marketShareChange": -0.3},
+    {"name": "Apple", "segment": "PC", "matchesBG": "IDG", "quarterlyRevenue": 7800, "revenueGrowthYoY": 4.5, "grossMargin": 38.2, "operatingMargin": 30.1, "marketShare": 8.5, "marketShareChange": 0.2},
+    {"name": "ASUS", "segment": "PC", "matchesBG": "IDG", "quarterlyRevenue": 3600, "revenueGrowthYoY": 5.2, "grossMargin": 15.8, "operatingMargin": 5.2, "marketShare": 7.1, "marketShareChange": 0.3},
+    {"name": "Dell Technologies", "segment": "Server/ISG", "matchesBG": "ISG", "quarterlyRevenue": 11500, "revenueGrowthYoY": 12.5, "grossMargin": 32.0, "operatingMargin": 11.2, "marketShare": 31.5, "marketShareChange": 0.8},
+    {"name": "HPE", "segment": "Server/ISG", "matchesBG": "ISG", "quarterlyRevenue": 7200, "revenueGrowthYoY": 8.3, "grossMargin": 34.5, "operatingMargin": 10.5, "marketShare": 15.2, "marketShareChange": -0.4},
+    {"name": "Inspur", "segment": "Server/ISG", "matchesBG": "ISG", "quarterlyRevenue": 4200, "revenueGrowthYoY": 15.8, "grossMargin": 12.5, "operatingMargin": 3.8, "marketShare": 10.8, "marketShareChange": 1.2},
+    {"name": "Accenture", "segment": "IT Services", "matchesBG": "SSG", "quarterlyRevenue": 16200, "revenueGrowthYoY": 6.5, "grossMargin": 33.0, "operatingMargin": 15.8, "marketShare": 5.2, "marketShareChange": 0.1},
+    {"name": "IBM", "segment": "IT Services", "matchesBG": "SSG", "quarterlyRevenue": 4500, "revenueGrowthYoY": 3.2, "grossMargin": 56.5, "operatingMargin": 18.2, "marketShare": 3.8, "marketShareChange": -0.1},
+]
+
+_market_segments = [
+    {"segment": "Global PC", "totalMarketSizeB": 62.5, "growthRate": 3.8, "lenovoRevenueM": 14200, "lenovoShare": 23.5, "lenovoShareChange": 0.6,
+     "topPlayers": [{"name": "Lenovo", "share": 23.5}, {"name": "HP", "share": 20.8}, {"name": "Dell", "share": 16.2}, {"name": "Apple", "share": 8.5}, {"name": "ASUS", "share": 7.1}]},
+    {"segment": "Server & Infrastructure", "totalMarketSizeB": 32.8, "growthRate": 14.2, "lenovoRevenueM": 3400, "lenovoShare": 6.2, "lenovoShareChange": 0.5,
+     "topPlayers": [{"name": "Dell", "share": 31.5}, {"name": "HPE", "share": 15.2}, {"name": "Inspur", "share": 10.8}, {"name": "Lenovo", "share": 6.2}, {"name": "Supermicro", "share": 5.8}]},
+    {"segment": "IT Services & Solutions", "totalMarketSizeB": 120.0, "growthRate": 7.5, "lenovoRevenueM": 1800, "lenovoShare": 1.5, "lenovoShareChange": 0.3,
+     "topPlayers": [{"name": "Accenture", "share": 5.2}, {"name": "IBM", "share": 3.8}, {"name": "TCS", "share": 3.2}, {"name": "Infosys", "share": 2.8}, {"name": "Lenovo SSG", "share": 1.5}]},
+]
+
+
+def get_peer_data(filters: FilterState) -> dict:
+    """Peer benchmarking: competitor financials and market segments."""
+    companies = _peers[:]
+    if filters.selectedBGs:
+        companies = [c for c in companies if c["matchesBG"] in filters.selectedBGs]
+    return {"companies": companies, "markets": _market_segments}
+
+
+# ── Macro Economic Data ─────────────────────────────────────────────
+_macro_indicators = [
+    {"name": "GDP Growth", "region": "Global", "value": 3.1, "unit": "%", "change": 0.2, "trend": "improving", "impactOnLenovo": "全球经济温和复苏，IT 支出增长预期上调", "affectedBGs": ["IDG", "ISG", "SSG"]},
+    {"name": "GDP Growth", "region": "PRC", "value": 4.8, "unit": "%", "change": -0.3, "trend": "stable", "impactOnLenovo": "中国市场增速放缓，消费电子需求承压", "affectedBGs": ["IDG"]},
+    {"name": "GDP Growth", "region": "NA", "value": 2.5, "unit": "%", "change": 0.3, "trend": "improving", "impactOnLenovo": "北美企业级 IT 更新需求回暖", "affectedBGs": ["ISG", "SSG"]},
+    {"name": "GDP Growth", "region": "Europe", "value": 1.2, "unit": "%", "change": 0.1, "trend": "stable", "impactOnLenovo": "欧洲经济低增长，但数字化转型投资持续", "affectedBGs": ["ISG", "SSG"]},
+    {"name": "PMI (Manufacturing)", "region": "Global", "value": 52.3, "unit": "", "change": 1.1, "trend": "improving", "impactOnLenovo": "PMI 回升至扩张区间，企业采购意愿增强", "affectedBGs": ["IDG", "ISG"]},
+    {"name": "IT Spending Growth", "region": "Global", "value": 8.6, "unit": "%", "change": 1.5, "trend": "improving", "impactOnLenovo": "AI 驱动 IT 支出加速增长，服务器需求旺盛", "affectedBGs": ["ISG", "SSG"]},
+    {"name": "Consumer Confidence", "region": "PRC", "value": 88.5, "unit": "", "change": -2.1, "trend": "deteriorating", "impactOnLenovo": "消费者信心下降，PC 消费升级放缓", "affectedBGs": ["IDG"]},
+    {"name": "Consumer Confidence", "region": "NA", "value": 105.2, "unit": "", "change": 3.5, "trend": "improving", "impactOnLenovo": "北美消费信心走强，有利于高端 PC 销售", "affectedBGs": ["IDG"]},
+    {"name": "Inflation Rate", "region": "Global", "value": 3.2, "unit": "%", "change": -0.5, "trend": "improving", "impactOnLenovo": "通胀缓和，运营成本压力减轻", "affectedBGs": ["IDG", "ISG", "SSG"]},
+    {"name": "AI Infrastructure Index", "region": "Global", "value": 145, "unit": "", "change": 18, "trend": "improving", "impactOnLenovo": "AI 基础设施需求指数持续走高，ISG 受益明显", "affectedBGs": ["ISG", "SSG"]},
+]
+
+_currency_impact = [
+    {"pair": "USD/CNY", "rate": 7.25, "changeYoY": 2.1, "revenueImpactM": -180},
+    {"pair": "USD/EUR", "rate": 0.92, "changeYoY": -1.5, "revenueImpactM": 85},
+    {"pair": "USD/JPY", "rate": 152.3, "changeYoY": 5.8, "revenueImpactM": -45},
+    {"pair": "USD/BRL", "rate": 5.15, "changeYoY": 3.2, "revenueImpactM": -30},
+]
+
+_it_spending_base = [280, 275, 295, 310, 290, 285, 305, 325, 300]
+
+
+def get_macro_data(filters: FilterState) -> dict:
+    """Macro economics: indicators, FX impact, IT spending forecast."""
+    q = _period_to_quarter(filters.quarter)
+    qi = QUARTERS.index(q) if q in QUARTERS else 8
+    start = max(0, qi - 4)
+    quarters = QUARTERS[start:qi + 1]
+
+    indicators = _macro_indicators[:]
+    if filters.selectedBGs:
+        indicators = [ind for ind in indicators if any(bg in filters.selectedBGs for bg in ind["affectedBGs"])]
+
+    it_spending = {
+        "quarters": quarters,
+        "globalB": [_it_spending_base[start + i] if (start + i) < len(_it_spending_base) else 300 for i in range(len(quarters))],
+        "enterpriseB": [round((_it_spending_base[start + i] if (start + i) < len(_it_spending_base) else 300) * 0.65) for i in range(len(quarters))],
+        "consumerB": [round((_it_spending_base[start + i] if (start + i) < len(_it_spending_base) else 300) * 0.35) for i in range(len(quarters))],
+    }
+
+    return {
+        "indicators": indicators,
+        "currencyImpact": _currency_impact,
+        "itSpendingForecast": it_spending,
+    }
