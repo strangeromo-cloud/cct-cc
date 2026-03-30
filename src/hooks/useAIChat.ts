@@ -19,7 +19,7 @@ export function useAIChat() {
     addMessage, updateMessage, setIsOpen, setIsLoading, updateConversationContext, clearMessages,
   } = useContext(ChatContext);
   const { filters } = useFilters();
-  const streamAbortRef = useRef<AbortController | null>(null);
+  const _streamAbortRef = useRef<AbortController | null>(null);
 
   const sendMessage = useCallback(async (text: string) => {
     const userMsg: RichChatMessage = {
@@ -95,7 +95,7 @@ export function useAIChat() {
             });
           } else if (event.type === 'complete') {
             fullText = event.text || fullText;
-            finalBlocks = convertApiBlocks(event.blocks || []);
+            finalBlocks = convertApiBlocks((event.blocks || []) as Array<{ type: string; data?: Record<string, unknown> }>);
           } else if (event.type === 'error') {
             fullText = `分析出错: ${event.content || '未知错误'}`;
           }

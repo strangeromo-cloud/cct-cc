@@ -532,7 +532,7 @@ function handleSupplyChain(_intent: ParsedIntent, filters: FilterState, ctx: Par
   // Component cost trend chart
   if (componentCosts.length > 0) {
     const quarters = componentCosts[0].quarters;
-    const series = componentCosts.map((c, i) => ({
+    const series = componentCosts.map((c) => ({
       name: c.component,
       type: 'line' as const,
       data: c.priceIndex,
@@ -618,7 +618,6 @@ function handlePeerCompare(_intent: ParsedIntent, filters: FilterState, ctx: Par
   for (const seg of segments) {
     const segCompanies = companies.filter(c => c.segment === seg);
     // Add Lenovo row
-    const lenovoMarket = markets.find(m => m.segment.includes(seg.split('/')[0]));
     blocks.push({
       type: 'table',
       title: `${seg} 竞争对标`,
@@ -756,9 +755,6 @@ function handleCorrelation(_intent: ParsedIntent, filters: FilterState, ctx: Par
     });
 
     // Dual-axis chart showing correlation
-    const internalMax = Math.max(...corr.dataPoints.map(d => d.internal));
-    const externalMax = Math.max(...corr.dataPoints.map(d => d.external));
-
     blocks.push({
       type: 'chart',
       title: `${corr.internalMetric} vs ${corr.externalFactor}`,

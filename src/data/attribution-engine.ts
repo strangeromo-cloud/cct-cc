@@ -9,7 +9,7 @@ import type { EChartsOption } from 'echarts';
 import { getBGSummary } from './mock-tertiary';
 import { getOpeningData } from './mock-opening';
 import { getSecondaryData } from './mock-secondary';
-import { getSupplyChainData, getCorrelationInsights, getMacroData, getPeerData } from './mock-external';
+import { getSupplyChainData, getMacroData, getPeerData } from './mock-external';
 import { QUARTERS, BUSINESS_GROUPS, periodToQuarter } from './constants';
 import { formatCurrency, formatPercent } from '@/utils/formatters';
 import { chartColors } from '@/utils/chart-theme';
@@ -47,7 +47,7 @@ export interface AttributionResult {
 
 export function runAttribution(
   metric: string,
-  bgs: BusinessGroup[],
+  _bgs: BusinessGroup[],
   filters: FilterState,
   compType: 'qoq' | 'yoy',
 ): AttributionResult {
@@ -628,7 +628,7 @@ function buildInternalExternalPie(internalImpact: number, externalImpact: number
         },
         data: data.map((d, i) => ({
           ...d,
-          itemStyle: { color: i === 0 ? chartColors.chartBlue : chartColors.chartOrange },
+          itemStyle: { color: i === 0 ? chartColors.blue : chartColors.orange },
         })),
       },
     ],

@@ -299,7 +299,7 @@ export interface CorrelationInsight {
   dataPoints: { label: string; internal: number; external: number }[];
 }
 
-export function getCorrelationInsights(filters: FilterState): CorrelationInsight[] {
+export function getCorrelationInsights(_filters: FilterState): CorrelationInsight[] {
   return [
     {
       internalMetric: 'ISG Revenue',
