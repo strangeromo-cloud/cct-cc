@@ -1,4 +1,5 @@
 {
+  "build_type": "python",
   "python": {
     "entry": "main.py"
   }
