@@ -1,6 +1,3 @@
 {
-  "build_type": "python",
-  "python": {
-    "entry": "main.py"
-  }
+  "build_type": "docker"
 }
