@@ -233,11 +233,22 @@ _market_segments = [
 
 
 def get_peer_data(filters: FilterState) -> dict:
-    """Peer benchmarking: competitor financials and market segments."""
-    companies = _peers[:]
+    """Peer benchmarking: competitor financials and market segments.
+    Tries yfinance first, falls back to mock data."""
+    from external_data import fetch_peer_financials
+
+    real_data = fetch_peer_financials()
+    if real_data:
+        companies = real_data
+        source = "yfinance"
+    else:
+        companies = _peers[:]
+        source = "mock"
+
     if filters.selectedBGs:
         companies = [c for c in companies if c["matchesBG"] in filters.selectedBGs]
-    return {"companies": companies, "markets": _market_segments}
+
+    return {"companies": companies, "markets": _market_segments, "dataSource": source}
 
 
 # ── Macro Economic Data ─────────────────────────────────────────────
@@ -265,15 +276,35 @@ _it_spending_base = [280, 275, 295, 310, 290, 285, 305, 325, 300]
 
 
 def get_macro_data(filters: FilterState) -> dict:
-    """Macro economics: indicators, FX impact, IT spending forecast."""
+    """Macro economics: indicators, FX impact, IT spending forecast.
+    Tries fredapi + yfinance first, falls back to mock data."""
+    from external_data import fetch_macro_indicators, fetch_fx_rates
+
     q = _period_to_quarter(filters.quarter)
     qi = QUARTERS.index(q) if q in QUARTERS else 8
     start = max(0, qi - 4)
     quarters = QUARTERS[start:qi + 1]
 
-    indicators = _macro_indicators[:]
+    # Indicators: try FRED first
+    real_indicators = fetch_macro_indicators()
+    if real_indicators:
+        indicators = real_indicators
+        indicator_source = "FRED"
+    else:
+        indicators = _macro_indicators[:]
+        indicator_source = "mock"
+
     if filters.selectedBGs:
         indicators = [ind for ind in indicators if any(bg in filters.selectedBGs for bg in ind["affectedBGs"])]
+
+    # FX: try yfinance first
+    real_fx = fetch_fx_rates()
+    if real_fx:
+        currency_impact = real_fx
+        fx_source = "yfinance"
+    else:
+        currency_impact = _currency_impact
+        fx_source = "mock"
 
     it_spending = {
         "quarters": quarters,
@@ -284,6 +315,7 @@ def get_macro_data(filters: FilterState) -> dict:
 
     return {
         "indicators": indicators,
-        "currencyImpact": _currency_impact,
+        "currencyImpact": currency_impact,
         "itSpendingForecast": it_spending,
+        "dataSource": {"indicators": indicator_source, "fx": fx_source},
     }

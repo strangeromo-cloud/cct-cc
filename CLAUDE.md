@@ -59,7 +59,8 @@ A professional CFO dashboard for Lenovo finance teams. 3-tier drill-down views w
 │   ├── main.py                   # FastAPI app, all API routes
 │   ├── config.py                 # Env config (LLM key, base URL, model)
 │   ├── models.py                 # Pydantic models (mirrors TS types)
-│   ├── mock_data.py              # Mock data (mirrors frontend mock-*.ts)
+│   ├── mock_data.py              # Mock data + real data integration (yfinance/fredapi with mock fallback)
+│   ├── external_data.py          # External data service (yfinance for peers/FX, fredapi for macro)
 │   ├── llm_agent.py              # LLM Agent (OpenAI API + Function Calling + SSE streaming)
 │   ├── requirements.txt          # Python dependencies
 │   ├── .env.example              # Environment variable template
@@ -130,7 +131,7 @@ Any OpenAI-compatible API. Configure in `server/.env`:
 The AI assistant (built in Phases 1-5) supports:
 
 - **Phase 1 — Internal Cross-Query**: BG × Geo × Time arbitrary combination, auto chart selection, multi-turn context
-- **Phase 2 — External Data**: Supply chain (10 suppliers, 6 components), peer benchmarking (9 competitors, 3 segments), macro economics (10 indicators, FX impact), internal-external correlation
+- **Phase 2 — External Data**: Supply chain (10 suppliers, 6 components), peer benchmarking (7 competitors via yfinance real-time + mock fallback), macro economics (8 FRED indicators + mock fallback, 4 FX pairs via yfinance), internal-external correlation. Data sources: `yfinance` (competitor financials, FX rates), `fredapi` (GDP, PMI, CPI, Fed Funds, etc.), with 1-hour in-memory cache and automatic mock fallback.
 - **Phase 3 — Attribution Analysis**: Metric change decomposition into 5 factor categories (BG contribution, operational efficiency, supply chain, macro, competitive), waterfall visualization, confidence scoring
 - **Phase 5 — UX Polish**: Welcome screen with capability cards, floating action button (FAB), message avatars/timestamps/copy, chart fullscreen, table collapse/expand, typing animation
 
@@ -242,6 +243,7 @@ VITE_API_BASE_URL=https://your-domain.com    # Or relative path if same domain
 LLM_API_KEY=sk-xxx
 LLM_BASE_URL=https://api.openai.com/v1
 LLM_MODEL=gpt-4o
+FRED_API_KEY=your-fred-api-key        # Optional: https://fred.stlouisfed.org/docs/api/api_key.html
 HOST=0.0.0.0
 PORT=8000
 CORS_ORIGINS=https://your-domain.com
