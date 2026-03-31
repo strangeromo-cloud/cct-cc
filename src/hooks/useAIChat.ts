@@ -19,7 +19,6 @@ export function useAIChat() {
     addMessage, updateMessage, setIsOpen, setIsLoading, updateConversationContext, clearMessages,
   } = useContext(ChatContext);
   const { filters } = useFilters();
-  const _streamAbortRef = useRef<AbortController | null>(null);
 
   const sendMessage = useCallback(async (text: string) => {
     const userMsg: RichChatMessage = {
