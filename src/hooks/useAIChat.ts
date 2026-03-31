@@ -152,7 +152,7 @@ export function useAIChat() {
         blocks: [{
           type: 'insight',
           level: 'alert',
-          text: `连接后端服务失败。请确认服务器是否运行在 ${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}`,
+          text: `连接后端服务失败。请检查后端服务是否正常运行。`,
         }],
         timestamp: new Date(),
       };
