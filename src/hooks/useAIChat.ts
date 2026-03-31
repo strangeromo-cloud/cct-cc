@@ -1,4 +1,4 @@
-import { useContext, useCallback, useRef } from 'react';
+import { useContext, useCallback } from 'react';
 import { ChatContext } from '@/context/ChatContext';
 import { useFilters } from '@/hooks/useFilters';
 import { generateAIResponse } from '@/data/ai-responses';
