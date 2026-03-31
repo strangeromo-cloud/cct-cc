@@ -3,7 +3,7 @@
  * Toggle between local mock and remote API via VITE_API_BASE_URL.
  */
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'https://cct-backend.zeabur.app';
 
 /* ------------------------------------------------------------------ */
 /*  Generic fetch helper                                               */
