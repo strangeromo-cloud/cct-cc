@@ -2,7 +2,7 @@
 
 ## Overview
 
-A professional CFO dashboard for Lenovo finance teams. 3-tier drill-down views with AI chat, multi-dimensional filtering, and Bloomberg consensus comparison. Supports both frontend-only mode (mock data) and full-stack mode (FastAPI backend + LLM).
+A professional CFO dashboard for Lenovo finance teams. 3-tier drill-down views with AI chat, multi-dimensional filtering, and Bloomberg consensus comparison. Organized by the **"Growth → Profitability → Asset Velocity → Cash Flow"** value-creation framework. Supports both frontend-only mode (mock data) and full-stack mode (FastAPI backend + LLM).
 
 ## Tech Stack
 
@@ -11,7 +11,7 @@ A professional CFO dashboard for Lenovo finance teams. 3-tier drill-down views w
 - **Charts**: Apache ECharts via `echarts-for-react`
 - **Routing**: React Router v6
 - **State**: React Context (FilterContext, ChatContext, LanguageContext)
-- **i18n**: Custom lightweight system (translations.ts + useLanguage hook)
+- **i18n**: Custom lightweight system (translations.ts + useLanguage hook, localStorage persistence)
 - **Backend**: Python FastAPI + Uvicorn
 - **AI/LLM**: OpenAI-compatible API with Function Calling (supports GPT, DeepSeek, Qwen, Moonshot, Ollama etc.)
 
@@ -23,7 +23,7 @@ A professional CFO dashboard for Lenovo finance teams. 3-tier drill-down views w
 │   │   └── client.ts             # HTTP client for backend API
 │   ├── components/
 │   │   ├── layout/               # AppLayout, Header, FilterBar
-│   │   ├── charts/               # BaseChart, 10 chart wrappers, KPICard, InfoTooltip, ChartTitle
+│   │   ├── charts/               # BaseChart, chart wrappers, KPICard, InfoTooltip, ChartTitle, MetricTabbedChart, AlignedDataTable
 │   │   ├── ai-chat/
 │   │   │   ├── ChatPanel.tsx     # Side sheet panel
 │   │   │   ├── ChatFAB.tsx       # Floating action button (bottom-right entry)
@@ -35,14 +35,14 @@ A professional CFO dashboard for Lenovo finance teams. 3-tier drill-down views w
 │   │   │   └── MessageBlocks/    # Rich block renderers (Chart, KPI, Table, Insight, Source, Thinking)
 │   │   └── ui/                   # shadcn components
 │   ├── pages/
-│   │   ├── opening/              # Quarter Overview (KPIs, consensus, waterfall, margins)
-│   │   ├── secondary/            # Operating Numbers (Momentum → Profitability → Asset → Cash)
-│   │   └── tertiary/             # BG Breakdown (Revenue/GP/OI by IDG/ISG/SSG)
+│   │   ├── opening/              # Quarter Overview (KPIs, consensus tabs, profitability waterfall, margins)
+│   │   ├── secondary/            # Operating Numbers (4-tier: Momentum → Profitability → Asset → Cash)
+│   │   └── tertiary/             # BG Breakdown (Revenue/GP/OI by IDG/ISG/SSG, GP%/OI% trends, heatmap)
 │   ├── data/
-│   │   ├── constants.ts          # BGs, Geos, Quarters, period helpers, colors
+│   │   ├── constants.ts          # BGs (IDG/ISG/SSG), Geos, Quarters, period helpers, colors
 │   │   ├── mock-opening.ts       # Opening page mock data
-│   │   ├── mock-secondary.ts     # Secondary page mock data
-│   │   ├── mock-tertiary.ts      # Tertiary page mock data
+│   │   ├── mock-secondary.ts     # Secondary page mock data (with budget, thresholds, expense ratios)
+│   │   ├── mock-tertiary.ts      # Tertiary page mock data (IDG = PCSD + MBG aggregation)
 │   │   ├── mock-external.ts      # External data (supply chain, peers, macro, correlations)
 │   │   ├── ai-responses.ts       # Frontend AI engine (regex intent → structured response)
 │   │   ├── query-engine.ts       # Cross-query engine (BG × Geo × Time)
@@ -53,7 +53,7 @@ A professional CFO dashboard for Lenovo finance teams. 3-tier drill-down views w
 │   ├── context/                  # FilterContext, ChatContext, LanguageContext
 │   ├── hooks/                    # useFilters, useAIChat, useLanguage
 │   ├── types/                    # TypeScript interfaces (index.ts, ai-types.ts, i18n.ts)
-│   └── utils/                    # formatters, chart-theme
+│   └── utils/                    # formatters (M-based currency), chart-theme
 │
 ├── server/                       # Backend (Python FastAPI)
 │   ├── main.py                   # FastAPI app, all API routes
@@ -66,9 +66,11 @@ A professional CFO dashboard for Lenovo finance teams. 3-tier drill-down views w
 │   ├── .env.example              # Environment variable template
 │   └── README.md                 # Backend startup guide
 │
+├── docs/
+│   └── api-migration-guide.md    # Guide for replacing mock data with real APIs
+│
 ├── .env                          # Frontend env (VITE_AI_MODE, VITE_API_BASE_URL)
-├── .env.api                      # Preset for API mode
-└── docs/                         # Design docs
+└── .env.api                      # Preset for API mode
 ```
 
 ## Quick Start
@@ -95,6 +97,64 @@ cp .env.api .env
 npm run dev                       # http://localhost:5173
 ```
 
+## Business Groups
+
+The dashboard uses 3 reporting BGs: **IDG**, **ISG**, **SSG**.
+- **IDG** (Intelligent Devices Group) = PCSD + MBG aggregated internally
+- **ISG** (Infrastructure Solutions Group)
+- **SSG** (Solutions & Services Group)
+
+The filter bar exposes IDG/ISG/SSG. Mock data generates PCSD + MBG separately and aggregates them into IDG via `expandBGs()` in `mock-tertiary.ts`.
+
+## Dashboard Hierarchy
+
+### Opening Page — Quarter Overview (`/`)
+- **KPI Cards**: Revenue, Gross Profit, GP%, Operating Income, Net Income (with YoY comparison)
+- **Actual vs Bloomberg Consensus**: 5-tab chart (one per metric), each with aligned data table below. Metrics with consensus (Revenue, Net Income) show dual-axis with Beat % on right Y-axis. X-axis: last 5 quarters.
+- **Profitability Waterfall**: Revenue → COGS → Gross Profit → OpEx → Operating Income → Tax & Interest → Net Income, with aligned data table showing amounts and margin percentages, plus QoQ/YoY comparisons.
+- **Key Margin Ratios**: GP%, OI%, Net Margin gauge charts.
+- **Revenue Trend**: Quarterly revenue line chart with 5-quarter history.
+- FilterBar: quarterly selector only (no time granularity toggle on this page).
+
+### Secondary Page — Operating Numbers (`/secondary`)
+Organized by CFO "Growth → Profitability → Asset → Cash" framework:
+
+- **Tier 1 — Forward-looking Momentum**: Pipeline funnel, Backlog coverage ratio
+- **Tier 2 — Profitability & Operating Leverage**: Revenue-to-Net-Income waterfall (bridge chart), expense ratios (S&M/R&D/Fixed as % of revenue)
+- **Tier 3 — Asset Velocity**: Inventory trend, WOI (Weeks of Inventory) with threshold alerts
+- **Tier 4 — Cash Flow & Liquidity**: AR vs AP dual-axis comparison, CCC (Cash Conversion Cycle) with threshold alerts
+
+All charts have aligned data tables below. Budget/Actual variance analysis integrated. Red/amber/green alert thresholds for WOI and CCC.
+
+### Tertiary Page — BG Breakdown (`/tertiary`)
+- **Revenue by BG**: Stacked bar chart (IDG/ISG/SSG) over 5 quarters
+- **Gross Profit by BG**: Stacked bar chart
+- **Operating Income by BG**: Stacked bar chart
+- **BG GP% Trend**: Line chart comparing GP margin by BG
+- **BG OI% Comparison**: Line chart comparing OI margin by BG
+- **Geo × BG Heatmap**: Cross-matrix showing revenue intensity
+- **Regional Profitability**: GP margin by geography comparison
+
+## Filtering System
+
+### FilterBar Behavior
+- **Opening page**: Only shows quarter selector (always quarterly granularity)
+- **Other pages**: Shows time granularity toggle + dynamic period selector
+  - Quarterly → shows all quarters (FY24Q1 ~ FY26Q1)
+  - Monthly → shows last 13 months (e.g., "Apr 2025")
+  - Daily → shows last 31 days (e.g., "Jun 15")
+- Changing granularity auto-selects the latest period via `getDefaultPeriod()`
+- Monthly/daily periods map back to parent quarter via `periodToQuarter()` for data lookup
+
+### BG & Geo Dropdowns
+- Multi-select dropdown with "All" toggle (click All to select all, click again to deselect all)
+- Can select individual items for comparison
+- Empty selection allowed (shows "—" in display)
+
+### Data Currency
+- All monetary values displayed in millions ($M format) via `formatCurrency()`
+- Default quarter: latest in QUARTERS array (currently FY26Q1)
+
 ## AI Modes (VITE_AI_MODE)
 
 | Mode | Description | Backend? |
@@ -102,6 +162,11 @@ npm run dev                       # http://localhost:5173
 | `local` | Frontend regex engine, all mock data in browser (default) | No |
 | `api` | Backend LLM, non-streaming, complete response | Yes |
 | `api-stream` | Backend LLM, SSE streaming, progressive display | Yes |
+
+### Streaming Behavior
+- During streaming, only ThinkingBlock steps are shown (no raw JSON displayed)
+- Formatted blocks (charts, tables, KPIs) render only after `complete` event
+- Unknown block types extract `content`/`text` fields instead of dumping raw JSON
 
 ## Supported LLM Providers
 
@@ -128,12 +193,10 @@ Any OpenAI-compatible API. Configure in `server/.env`:
 
 ## AI Assistant Capabilities
 
-The AI assistant (built in Phases 1-5) supports:
-
-- **Phase 1 — Internal Cross-Query**: BG × Geo × Time arbitrary combination, auto chart selection, multi-turn context
-- **Phase 2 — External Data**: Supply chain (10 suppliers, 6 components), peer benchmarking (7 competitors via yfinance real-time + mock fallback), macro economics (8 FRED indicators + mock fallback, 4 FX pairs via yfinance), internal-external correlation. Data sources: `yfinance` (competitor financials, FX rates), `fredapi` (GDP, PMI, CPI, Fed Funds, etc.), with 1-hour in-memory cache and automatic mock fallback.
-- **Phase 3 — Attribution Analysis**: Metric change decomposition into 5 factor categories (BG contribution, operational efficiency, supply chain, macro, competitive), waterfall visualization, confidence scoring
-- **Phase 5 — UX Polish**: Welcome screen with capability cards, floating action button (FAB), message avatars/timestamps/copy, chart fullscreen, table collapse/expand, typing animation
+- **Internal Cross-Query**: BG × Geo × Time arbitrary combination, auto chart selection, multi-turn context
+- **External Data**: Supply chain (10 suppliers, 6 components), peer benchmarking (7 competitors via yfinance real-time + mock fallback), macro economics (8 FRED indicators + mock fallback, 4 FX pairs via yfinance), internal-external correlation
+- **Attribution Analysis**: Metric change decomposition into 5 factor categories (BG contribution, operational efficiency, supply chain, macro, competitive), waterfall visualization, confidence scoring
+- **UX Polish**: Welcome screen with capability cards, FAB, message avatars/timestamps/copy, chart fullscreen, table collapse/expand, typing animation
 
 ## Color Scheme
 
@@ -144,8 +207,8 @@ The AI assistant (built in Phases 1-5) supports:
 | Background | `#F7F7F7` | Page background |
 | Muted / Secondary text | `#A2A2A2` | Labels, axis text, descriptions |
 | Card | `#FFFFFF` | Card backgrounds |
-| Positive | `#00A650` | Green for uptrends, AP bars |
-| Chart Blue | `#0073CE` | Primary chart series, AR bars |
+| Positive | `#00A650` | Green for uptrends, AP bars, SSG |
+| Chart Blue | `#0073CE` | Primary chart series, AR bars, ISG |
 | Chart Orange | `#F5A623` | Secondary series, WOI line |
 
 ## Key Patterns
@@ -153,6 +216,7 @@ The AI assistant (built in Phases 1-5) supports:
 ### Data Flow
 - **Frontend-only**: Pages use `useMemo(() => mockFunction(filters), [filters])` for reactive data.
 - **With backend**: Replace with `fetch` calls to `/api/data/*` endpoints. API client in `src/api/client.ts`.
+- **Migration guide**: See `docs/api-migration-guide.md` for phased approach to replace mock data with real APIs.
 
 ### AI Chat Architecture
 - `useAIChat` hook reads `VITE_AI_MODE` to switch between frontend engine and backend API.
@@ -165,7 +229,7 @@ The AI assistant (built in Phases 1-5) supports:
   - `get_peer_data` — Peer benchmarking (9 competitors, 3 market segments, market share)
   - `get_macro_data` — Macro economics (GDP, PMI, IT spending, consumer confidence, FX impact)
 - LLM decides which tools to call → `mock_data.py` returns data → LLM analyzes and responds with structured JSON blocks.
-- SSE streaming: tool calls are non-streaming (emit `thinking` events), final answer is streamed via `sse-starlette`.
+- SSE streaming: tool calls are non-streaming (emit `thinking` events), final answer rendered after `complete` event (no raw JSON exposed).
 - ThinkingBlock: shows LLM's reasoning steps in real-time (expanded during thinking, auto-collapsed on complete).
 - ChatPanel: resizable width (drag left edge, 380–900px), no backdrop blur overlay.
 - All AI assistant UI elements (FAB, header icon, bot avatar, send button) use brand red `#E12726`.
@@ -177,10 +241,16 @@ The AI assistant (built in Phases 1-5) supports:
 - **Fact vs advice separation**: Data-based facts are stated directly; analytical suggestions are labeled "based on current data" or "based on XX assumption".
 
 ### Filtering
-`FilterContext` holds global state. FilterBar reads route to conditionally show/hide time granularity. Empty BG/GEO selection = all.
+`FilterContext` holds global state. FilterBar reads route (`useLocation`) to conditionally show/hide time granularity on opening page. Period changes auto-switch via `getDefaultPeriod()`. BG/Geo use multi-select dropdown with All toggle.
 
 ### i18n
-`LanguageContext` with `localStorage('cct-language')` persistence. All UI text goes through `translations.ts`.
+`LanguageContext` with `localStorage('cct-language')` persistence. Language selection persists across page navigation and sessions. All UI text goes through `translations.ts`.
+
+### Metric Tooltips
+Each KPI card has an `InfoTooltip` (?) icon showing metric definition and calculation formula. Uses portal rendering to avoid clipping by parent containers.
+
+### Aligned Data Tables
+Charts with data tables use a consistent pattern: chart `grid.left`/`grid.right` margins match table padding, so table columns align precisely with x-axis points. Implemented via `AlignedDataTable` component and per-chart inline tables.
 
 ## Commands
 
@@ -249,21 +319,15 @@ PORT=8000
 CORS_ORIGINS=https://your-domain.com
 ```
 
-### Docker (Optional)
-
-```dockerfile
-# See docker-compose.yml (if added) for containerized deployment
-```
-
 ## Update Workflow
 
 1. Develop & test locally
 2. Update `CLAUDE.md` with new features/changes
-3. Add/update test cases
-4. `git add . && git commit && git push`
-5. On server: `git pull && npm run build && pm2 restart cct-api`
+3. `git add . && git commit && git push`
+4. On server: `git pull && npm run build && pm2 restart cct-api`
 
 ## Known Issues
 
 - `@base-ui/react` Select/Separator components produce "Invalid hook call" console warnings in strict mode. Purely cosmetic — app functions correctly.
 - `npm run build` must be run on the same OS as `node_modules` was installed (rolldown native bindings are platform-specific).
+- Base-ui Select dropdowns are difficult to interact with programmatically in testing tools; manual UI testing recommended for filter behavior.

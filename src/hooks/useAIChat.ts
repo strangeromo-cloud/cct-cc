@@ -84,12 +84,13 @@ export function useAIChat() {
             });
           } else if (event.type === 'delta' && event.content) {
             fullText += event.content;
-            // Live-update with accumulated text + thinking block
+            // Accumulate text but don't render raw delta — it may be JSON.
+            // Only show thinking steps during streaming; formatted blocks
+            // will be rendered once the 'complete' event arrives.
             updateMessage(assistantMsgId, {
               content: fullText,
               blocks: [
                 { type: 'thinking', steps: [...thinkingSteps] },
-                { type: 'text', content: fullText },
               ],
             });
           } else if (event.type === 'complete') {
@@ -202,7 +203,8 @@ function convertApiBlocks(apiBlocks: Array<{ type: string; data?: Record<string,
           height: (d.height as number) || undefined,
         };
       default:
-        return { type: 'text' as const, content: JSON.stringify(d) };
+        // Don't dump raw JSON — render the text content if available, otherwise skip
+        return { type: 'text' as const, content: (d.content as string) || (d.text as string) || '' };
     }
   });
 }
