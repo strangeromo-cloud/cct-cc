@@ -52,35 +52,40 @@ def _set_cached(key: str, val: Any) -> None:
 # ══════════════════════════════════════════════════════════════════════
 
 def fetch_treasury_10y_series(years: int = 5) -> dict | None:
-    """US 10-Year Treasury Yield from FRED (DGS10)."""
+    """US 10-Year Treasury Yield from yfinance (^TNX).
+
+    ^TNX is the CBOE 10-Year Treasury Note Yield Index. Yahoo publishes it as
+    yield × 10 (e.g. 42.50 means 4.25%), so we divide by 10 when the magnitude
+    clearly indicates the scaled form.
+    """
     cache_key = f"treasury_10y_{years}y"
     cached = _get_cached(cache_key, CACHE_TTL_SHORT)
     if cached is not None:
         return cached
 
     try:
-        from fredapi import Fred
-        from config import FRED_API_KEY
-        if not FRED_API_KEY:
+        import yfinance as yf
+
+        ticker = yf.Ticker("^TNX")
+        hist = ticker.history(period=f"{years}y", interval="1mo")
+        if hist.empty:
+            logger.warning("yfinance ^TNX returned empty history")
             return None
 
-        fred = Fred(api_key=FRED_API_KEY)
-        start = (datetime.now() - timedelta(days=365 * years)).strftime("%Y-%m-%d")
-        series = fred.get_series("DGS10", observation_start=start)
-        series = series.dropna()
-
-        # Downsample to monthly to reduce payload size
-        monthly = series.resample("M").last().dropna()
+        close = hist["Close"].dropna()
+        # Normalize scale: ^TNX typically reports yield × 10. 10Y yields since
+        # 1960 have never exceeded ~16%, so any value > 20 implies scaled form.
+        scale = 10.0 if float(close.max()) > 20 else 1.0
 
         result = {
-            "dates": [d.strftime("%Y-%m") for d in monthly.index],
-            "values": [round(float(v), 2) for v in monthly.values],
-            "source": "FRED",
-            "seriesId": "DGS10",
+            "dates": [d.strftime("%Y-%m") for d in close.index],
+            "values": [round(float(v) / scale, 2) for v in close.values],
+            "source": "yfinance",
+            "seriesId": "^TNX",
             "unit": "%",
         }
         _set_cached(cache_key, result)
-        logger.info(f"FRED: fetched 10Y Treasury, {len(monthly)} points")
+        logger.info(f"yfinance: fetched 10Y Treasury (^TNX), {len(close)} points")
         return result
     except Exception as e:
         logger.warning(f"fetch_treasury_10y_series failed: {e}")
@@ -259,8 +264,9 @@ def fetch_gscpi_series(years: int = 5) -> dict | None:
     Official source: https://www.newyorkfed.org/research/policy/gscpi
 
     Note: NY Fed serves the file as a legacy .xls (OLE/CFB) even though the
-    URL ends in .xlsx. We detect file format via magic bytes and pick the
-    appropriate pandas engine (xlrd for .xls, openpyxl for .xlsx).
+    URL ends in .xlsx. We use python-calamine (pandas engine="calamine"),
+    which handles both .xls and .xlsx without xlrd — xlrd>=2.0 dropped .xls
+    support, so pandas + xlrd can no longer read this file.
     """
     cache_key = f"gscpi_{years}y"
     cached = _get_cached(cache_key, CACHE_TTL_LONG)
@@ -280,11 +286,10 @@ def fetch_gscpi_series(years: int = 5) -> dict | None:
         response.raise_for_status()
         content = response.content
 
-        # Detect actual file format from magic bytes
-        # - .xls (OLE/CFB): starts with D0 CF 11 E0
-        # - .xlsx (ZIP):    starts with 50 4B 03 04 (PK..)
+        # Detect actual file format from magic bytes (for logging only).
+        # Calamine handles both .xls (OLE/CFB, D0 CF 11 E0) and .xlsx (ZIP, PK..).
         is_xls = content[:4] == b"\xd0\xcf\x11\xe0"
-        engine = "xlrd" if is_xls else "openpyxl"
+        engine = "calamine"
         logger.info(f"GSCPI: detected format {'xls' if is_xls else 'xlsx'}, using engine={engine}")
 
         # Try preferred sheet name, then any sheet containing GSCPI

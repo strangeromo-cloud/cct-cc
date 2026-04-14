@@ -164,7 +164,7 @@ async def api_global_debug_gscpi():
         }
         try:
             import pandas as pd
-            engine = "xlrd" if is_xls else "openpyxl"
+            engine = "calamine"
             xl = pd.ExcelFile(_io.BytesIO(content), engine=engine)
             result["engine"] = engine
             result["sheet_names"] = list(xl.sheet_names)
