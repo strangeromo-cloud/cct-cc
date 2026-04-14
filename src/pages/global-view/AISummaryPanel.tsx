@@ -77,7 +77,7 @@ export function AISummaryPanel({ macro, supplyChain, competitive, ready }: Props
   const actionsLabel = language === 'zh' ? 'CFO 建议' : 'CFO Actions';
 
   return (
-    <Card className="shadow-sm border-l-4 border-l-lenovo-red">
+    <Card className="shadow-sm">
       <CardContent className="py-4">
         <div className="flex items-center gap-2 mb-3">
           <Sparkles className="h-4 w-4 text-lenovo-red" />

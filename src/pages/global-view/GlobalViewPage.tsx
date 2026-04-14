@@ -46,7 +46,7 @@ export function GlobalViewPage() {
   }, [years]);
 
   const allLoaded = !loadingMacro && !loadingSupply && !loadingComp;
-  const title = language === 'zh' ? '全球视图 — 外部环境看板' : 'Global View — External Environment Dashboard';
+  const title = language === 'zh' ? '全球视图' : 'Global View';
 
   return (
     <div className="space-y-4">
