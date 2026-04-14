@@ -43,12 +43,12 @@ function YieldVsPEChart({ yield10Y, pe, loading }: { yield10Y: TimeSeries | null
     const dates = yield10Y?.dates ?? pe?.dates ?? [];
     return {
       tooltip: { trigger: 'axis' },
-      legend: { top: 0, right: 0, textStyle: { fontSize: 10 } },
-      grid: { left: 50, right: 50, top: 30, bottom: 40 },
+      legend: { top: 0, left: 'center', textStyle: { fontSize: 10 }, itemGap: 20 },
+      grid: { left: 50, right: 45, top: 40, bottom: 40 },
       xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 10, hideOverlap: true } },
       yAxis: [
-        { type: 'value', name: yAxis1, nameTextStyle: { fontSize: 10, color: '#0073CE' }, axisLabel: { fontSize: 10, formatter: '{value}%', color: '#0073CE' }, splitLine: { lineStyle: { color: '#F0F0F0', type: 'dashed' } } },
-        { type: 'value', name: yAxis2, nameTextStyle: { fontSize: 10, color: '#F5A623' }, axisLabel: { fontSize: 10, color: '#F5A623' }, splitLine: { show: false } },
+        { type: 'value', axisLabel: { fontSize: 10, formatter: '{value}%', color: '#0073CE' }, splitLine: { lineStyle: { color: '#F0F0F0', type: 'dashed' } } },
+        { type: 'value', axisLabel: { fontSize: 10, color: '#F5A623' }, splitLine: { show: false } },
       ],
       series: [
         { name: yAxis1, type: 'line', yAxisIndex: 0, data: yield10Y?.values ?? [], smooth: true, symbol: 'none', lineStyle: { color: '#0073CE', width: 2 } },
@@ -90,12 +90,12 @@ function DXYVsVIXChart({ dxy, vix, loading }: { dxy: TimeSeries | null; vix: Tim
 
     return {
       tooltip: { trigger: 'axis' },
-      legend: { top: 0, right: 0, textStyle: { fontSize: 10 } },
-      grid: { left: 50, right: 50, top: 30, bottom: 40 },
+      legend: { top: 0, left: 'center', textStyle: { fontSize: 10 }, itemGap: 20 },
+      grid: { left: 50, right: 45, top: 40, bottom: 40 },
       xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 10, hideOverlap: true } },
       yAxis: [
-        { type: 'value', name: 'DXY', nameTextStyle: { fontSize: 10, color: '#0073CE' }, axisLabel: { fontSize: 10, color: '#0073CE' } },
-        { type: 'value', name: 'VIX', nameTextStyle: { fontSize: 10, color: '#E12726' }, axisLabel: { fontSize: 10, color: '#E12726' }, splitLine: { show: false } },
+        { type: 'value', axisLabel: { fontSize: 10, color: '#0073CE' } },
+        { type: 'value', axisLabel: { fontSize: 10, color: '#E12726' }, splitLine: { show: false } },
       ],
       series: [
         { name: label1, type: 'line', yAxisIndex: 0, data: dxy?.values ?? [], smooth: true, symbol: 'none', lineStyle: { color: '#0073CE', width: 2 } },

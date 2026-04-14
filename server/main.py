@@ -144,6 +144,47 @@ async def api_global_supply_chain(years: int = 5):
     return get_supply_chain_data(years)
 
 
+@app.get("/api/global/debug/gscpi")
+async def api_global_debug_gscpi():
+    """Diagnostic endpoint: returns full error traceback if GSCPI fetch fails."""
+    import traceback
+    import requests as _requests
+    import io as _io
+    try:
+        url = "https://www.newyorkfed.org/medialibrary/research/interactives/gscpi/downloads/gscpi_data.xlsx"
+        response = _requests.get(url, timeout=30, headers={"User-Agent": "Mozilla/5.0 (CFO-Control-Tower)"})
+        content = response.content
+        is_xls = content[:4] == b"\xd0\xcf\x11\xe0"
+        result = {
+            "url": url,
+            "status": response.status_code,
+            "content_length": len(content),
+            "magic_bytes": content[:4].hex(),
+            "detected_format": "xls" if is_xls else "xlsx",
+        }
+        try:
+            import pandas as pd
+            engine = "xlrd" if is_xls else "openpyxl"
+            xl = pd.ExcelFile(_io.BytesIO(content), engine=engine)
+            result["engine"] = engine
+            result["sheet_names"] = list(xl.sheet_names)
+            for sheet in xl.sheet_names[:3]:
+                try:
+                    df_head = xl.parse(sheet, nrows=10)
+                    result[f"sheet_{sheet}_cols"] = [str(c) for c in df_head.columns]
+                except Exception as se:
+                    result[f"sheet_{sheet}_error"] = f"{type(se).__name__}: {se}"
+        except Exception as pe:
+            result["pandas_error"] = f"{type(pe).__name__}: {pe}"
+            result["pandas_traceback"] = traceback.format_exc()
+        return result
+    except Exception as e:
+        return {
+            "error": f"{type(e).__name__}: {e}",
+            "traceback": traceback.format_exc(),
+        }
+
+
 @app.get("/api/global/competitive")
 async def api_global_competitive():
     """Dimension 3: Competitive Landscape (competitor financials + market share)."""
