@@ -257,6 +257,10 @@ def fetch_gscpi_series(years: int = 5) -> dict | None:
     """
     Global Supply Chain Pressure Index from NY Fed.
     Official source: https://www.newyorkfed.org/research/policy/gscpi
+
+    Note: NY Fed serves the file as a legacy .xls (OLE/CFB) even though the
+    URL ends in .xlsx. We detect file format via magic bytes and pick the
+    appropriate pandas engine (xlrd for .xls, openpyxl for .xlsx).
     """
     cache_key = f"gscpi_{years}y"
     cached = _get_cached(cache_key, CACHE_TTL_LONG)
@@ -265,22 +269,71 @@ def fetch_gscpi_series(years: int = 5) -> dict | None:
 
     try:
         import requests
+        import pandas as pd
 
         url = "https://www.newyorkfed.org/medialibrary/research/interactives/gscpi/downloads/gscpi_data.xlsx"
-        response = requests.get(url, timeout=20)
+        response = requests.get(
+            url,
+            timeout=30,
+            headers={"User-Agent": "Mozilla/5.0 (CFO-Control-Tower)"},
+        )
         response.raise_for_status()
+        content = response.content
 
-        import pandas as pd
-        df = pd.read_excel(io.BytesIO(response.content), sheet_name="GSCPI Monthly Data", skiprows=5)
-        # Typical columns: "Date", "GSCPI"
-        df.columns = [str(c).strip() for c in df.columns]
-        date_col = df.columns[0]
-        value_col = [c for c in df.columns if "GSCPI" in c.upper()][0] if any("GSCPI" in c.upper() for c in df.columns) else df.columns[1]
+        # Detect actual file format from magic bytes
+        # - .xls (OLE/CFB): starts with D0 CF 11 E0
+        # - .xlsx (ZIP):    starts with 50 4B 03 04 (PK..)
+        is_xls = content[:4] == b"\xd0\xcf\x11\xe0"
+        engine = "xlrd" if is_xls else "openpyxl"
+        logger.info(f"GSCPI: detected format {'xls' if is_xls else 'xlsx'}, using engine={engine}")
+
+        # Try preferred sheet name, then any sheet containing GSCPI
+        xl = pd.ExcelFile(io.BytesIO(content), engine=engine)
+        sheet_names = xl.sheet_names
+        logger.info(f"GSCPI: available sheets: {sheet_names}")
+
+        target_sheet = None
+        for candidate in ["GSCPI Monthly Data", "GSCPI", "Monthly", "Data"]:
+            if candidate in sheet_names:
+                target_sheet = candidate
+                break
+        if target_sheet is None:
+            # Pick the sheet most likely to contain the data (first non-title)
+            target_sheet = sheet_names[0]
+
+        # The NY Fed file has header rows — try multiple skiprows values
+        df = None
+        for skip in [5, 4, 3, 2, 6, 0]:
+            try:
+                candidate_df = xl.parse(target_sheet, skiprows=skip)
+                cols = [str(c).strip() for c in candidate_df.columns]
+                # Must have a date-like column and a GSCPI column
+                has_date = any("date" in c.lower() or "period" in c.lower() for c in cols)
+                has_gscpi = any("gscpi" in c.lower() for c in cols)
+                if has_date and has_gscpi:
+                    df = candidate_df
+                    df.columns = cols
+                    logger.info(f"GSCPI: parsed sheet '{target_sheet}' with skiprows={skip}, cols={cols}")
+                    break
+            except Exception:
+                continue
+
+        if df is None:
+            logger.warning(f"GSCPI: failed to locate Date+GSCPI columns in sheet {target_sheet}")
+            return None
+
+        date_col = next(c for c in df.columns if "date" in c.lower() or "period" in c.lower())
+        value_col = next(c for c in df.columns if "gscpi" in c.lower())
 
         df = df.dropna(subset=[date_col, value_col])
-        df["date"] = pd.to_datetime(df[date_col])
+        df["date"] = pd.to_datetime(df[date_col], errors="coerce")
+        df = df.dropna(subset=["date"])
         cutoff = datetime.now() - timedelta(days=365 * years)
         df = df[df["date"] >= cutoff].sort_values("date")
+
+        if df.empty:
+            logger.warning(f"GSCPI: no data after date cutoff {cutoff}")
+            return None
 
         result = {
             "dates": [d.strftime("%Y-%m") for d in df["date"]],
@@ -293,7 +346,7 @@ def fetch_gscpi_series(years: int = 5) -> dict | None:
         logger.info(f"GSCPI: fetched {len(df)} points from NY Fed")
         return result
     except Exception as e:
-        logger.warning(f"fetch_gscpi_series failed: {e}")
+        logger.warning(f"fetch_gscpi_series failed: {type(e).__name__}: {e}")
         return None
 
 

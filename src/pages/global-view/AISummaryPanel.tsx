@@ -71,7 +71,7 @@ export function AISummaryPanel({ macro, supplyChain, competitive, ready }: Props
     return () => { cancelled = true; };
   }, [ready, macro, supplyChain, competitive, language]);
 
-  const title = language === 'zh' ? 'AI 外部环境分析总结' : 'AI Global View Summary';
+  const title = language === 'zh' ? '全球视图 - AI 总结' : 'Global View - AI Summary';
   const snapshotLabel = language === 'zh' ? '现状摘要' : 'Current Snapshot';
   const risksLabel = language === 'zh' ? '风险预警' : 'Risk Alerts';
   const actionsLabel = language === 'zh' ? 'CFO 建议' : 'CFO Actions';
