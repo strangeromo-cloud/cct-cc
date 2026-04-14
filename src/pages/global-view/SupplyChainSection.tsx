@@ -45,9 +45,9 @@ function ComponentPriceChart({ components, loading }: { components: ComponentPri
       xAxis: { type: 'category', data: components?.dates ?? [], axisLabel: { fontSize: 10, hideOverlap: true } },
       yAxis: { type: 'value', axisLabel: { fontSize: 10 }, name: 'Index (100)', nameTextStyle: { fontSize: 10 } },
       series: [
-        { name: 'DRAM', type: 'line', data: components?.dram ?? [], smooth: true, symbol: 'none', lineStyle: { color: '#0073CE', width: 2 } },
-        { name: 'NAND', type: 'line', data: components?.nand ?? [], smooth: true, symbol: 'none', lineStyle: { color: '#00A650', width: 2 } },
-        { name: 'LCD', type: 'line', data: components?.lcd ?? [], smooth: true, symbol: 'none', lineStyle: { color: '#F5A623', width: 2 } },
+        { name: 'DRAM', type: 'line', data: components?.dram ?? [], smooth: true, symbol: 'none', itemStyle: { color: '#0073CE' }, lineStyle: { color: '#0073CE', width: 2 } },
+        { name: 'NAND', type: 'line', data: components?.nand ?? [], smooth: true, symbol: 'none', itemStyle: { color: '#00A650' }, lineStyle: { color: '#00A650', width: 2 } },
+        { name: 'LCD', type: 'line', data: components?.lcd ?? [], smooth: true, symbol: 'none', itemStyle: { color: '#F5A623' }, lineStyle: { color: '#F5A623', width: 2 } },
       ],
     };
   }, [components]);

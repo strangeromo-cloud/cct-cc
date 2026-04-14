@@ -51,8 +51,8 @@ function YieldVsPEChart({ yield10Y, pe, loading }: { yield10Y: TimeSeries | null
         { type: 'value', axisLabel: { fontSize: 10, color: '#F5A623' }, splitLine: { show: false } },
       ],
       series: [
-        { name: yAxis1, type: 'line', yAxisIndex: 0, data: yield10Y?.values ?? [], smooth: true, symbol: 'none', lineStyle: { color: '#0073CE', width: 2 } },
-        { name: yAxis2, type: 'line', yAxisIndex: 1, data: pe?.values ?? [], smooth: true, symbol: 'none', lineStyle: { color: '#F5A623', width: 2 } },
+        { name: yAxis1, type: 'line', yAxisIndex: 0, data: yield10Y?.values ?? [], smooth: true, symbol: 'none', itemStyle: { color: '#0073CE' }, lineStyle: { color: '#0073CE', width: 2 } },
+        { name: yAxis2, type: 'line', yAxisIndex: 1, data: pe?.values ?? [], smooth: true, symbol: 'none', itemStyle: { color: '#F5A623' }, lineStyle: { color: '#F5A623', width: 2 } },
       ],
     };
   }, [yield10Y, pe, yAxis1, yAxis2]);
@@ -98,7 +98,7 @@ function DXYVsVIXChart({ dxy, vix, loading }: { dxy: TimeSeries | null; vix: Tim
         { type: 'value', axisLabel: { fontSize: 10, color: '#E12726' }, splitLine: { show: false } },
       ],
       series: [
-        { name: label1, type: 'line', yAxisIndex: 0, data: dxy?.values ?? [], smooth: true, symbol: 'none', lineStyle: { color: '#0073CE', width: 2 } },
+        { name: label1, type: 'line', yAxisIndex: 0, data: dxy?.values ?? [], smooth: true, symbol: 'none', itemStyle: { color: '#0073CE' }, lineStyle: { color: '#0073CE', width: 2 } },
         {
           name: label2,
           type: 'line',
@@ -106,6 +106,7 @@ function DXYVsVIXChart({ dxy, vix, loading }: { dxy: TimeSeries | null; vix: Tim
           data: vix?.values ?? [],
           smooth: true,
           symbol: 'none',
+          itemStyle: { color: '#E12726' },
           areaStyle: { color: 'rgba(225, 39, 38, 0.15)' },
           lineStyle: { color: '#E12726', width: 1.5 },
           markLine: {
