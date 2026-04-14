@@ -175,7 +175,7 @@ function EPUChart({ epu, loading }: { epu: TimeSeries | null; loading: boolean }
             symbolSize: 30,
             data: values.length > 0
               ? [
-                  { type: 'max', label: { fontSize: 9, formatter: '{c}' } },
+                  { name: 'max', type: 'max', label: { fontSize: 9, formatter: '{c}' } },
                 ]
               : [],
           },

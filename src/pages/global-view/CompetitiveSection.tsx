@@ -47,7 +47,6 @@ function RevenueGrowthChart({ competitors, source, loading }: { competitors: Com
 
   const option = useMemo<EChartsOption>(() => {
     const names = competitors.map((c) => c.name);
-    const growth = competitors.map((c) => c.revenueGrowthYoY ?? 0);
     const colors = competitors.map((c) => (c.revenueGrowthYoY ?? 0) >= 0 ? '#00A650' : '#E12726');
 
     return {
@@ -69,7 +68,7 @@ function RevenueGrowthChart({ competitors, source, loading }: { competitors: Com
           type: 'bar',
           data: competitors.map((c, i) => ({ value: c.revenueGrowthYoY ?? 0, itemStyle: { color: colors[i] } })),
           barMaxWidth: 30,
-          label: { show: true, position: 'top', fontSize: 10, formatter: (p: { value: number }) => `${p.value?.toFixed(1)}%` },
+          label: { show: true, position: 'top', fontSize: 10, formatter: (p) => `${Number(p.value ?? 0).toFixed(1)}%` },
           markLine: {
             silent: true,
             symbol: 'none',
