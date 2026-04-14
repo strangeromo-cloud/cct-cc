@@ -76,12 +76,9 @@ function RevenueGrowthChart({ competitors, source, loading }: { competitors: Com
 
   const option = useMemo<EChartsOption>(() => {
     const names = competitors.map((c) => c.name);
-    // Lenovo → red highlight; others → green (positive) / amber (negative)
-    const colors = competitors.map((c) => {
-      if (c.name === 'Lenovo') return '#E12726';
-      const v = c.revenueGrowthYoY ?? 0;
-      return v >= 0 ? '#00A650' : '#F5A623';
-    });
+    // All bars: green (positive) / amber (negative). Lenovo is identified by
+    // its bold red x-axis label instead of a distinct bar color.
+    const colors = competitors.map((c) => ((c.revenueGrowthYoY ?? 0) >= 0 ? '#00A650' : '#F5A623'));
 
     return {
       tooltip: {
@@ -113,11 +110,7 @@ function RevenueGrowthChart({ competitors, source, loading }: { competitors: Com
           type: 'bar',
           data: competitors.map((c, i) => ({
             value: c.revenueGrowthYoY ?? 0,
-            itemStyle: {
-              color: colors[i],
-              borderColor: c.name === 'Lenovo' ? '#E12726' : undefined,
-              borderWidth: c.name === 'Lenovo' ? 2 : 0,
-            },
+            itemStyle: { color: colors[i] },
           })),
           barMaxWidth: 30,
           label: { show: true, position: 'top', fontSize: 10, formatter: (p) => `${Number(p.value ?? 0).toFixed(1)}%` },
