@@ -8,6 +8,7 @@ import { ChatFAB } from '@/components/ai-chat/ChatFAB';
 import { OpeningPage } from '@/pages/opening/OpeningPage';
 import { SecondaryPage } from '@/pages/secondary/SecondaryPage';
 import { TertiaryPage } from '@/pages/tertiary/TertiaryPage';
+import { GlobalViewPage } from '@/pages/global-view/GlobalViewPage';
 
 function App() {
   return (
@@ -20,6 +21,7 @@ function App() {
               <Route index element={<OpeningPage />} />
               <Route path="operating" element={<SecondaryPage />} />
               <Route path="bg-breakdown" element={<TertiaryPage />} />
+              <Route path="global" element={<GlobalViewPage />} />
             </Route>
           </Routes>
           <ChatFAB />

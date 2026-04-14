@@ -22,3 +22,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Python / backend
+__pycache__/
+*.pyc
+server/.env
+server/venv/
+server/.venv/
+server-deploy.zip

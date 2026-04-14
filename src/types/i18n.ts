@@ -6,6 +6,7 @@ export interface Translations {
   navQuarterOverview: string;
   navOperatingNumbers: string;
   navBGBreakdown: string;
+  navGlobalView: string;
   aiAssistant: string;
 
   // Filter Bar

@@ -5,6 +5,7 @@ export const en: Translations = {
   navQuarterOverview: 'Quarter Overview',
   navOperatingNumbers: 'Operating Numbers',
   navBGBreakdown: 'BG Breakdown',
+  navGlobalView: 'Global View',
   aiAssistant: 'AI Assistant',
 
   filterTime: 'TIME',
@@ -106,6 +107,7 @@ export const zh: Translations = {
   navQuarterOverview: '季度概览',
   navOperatingNumbers: '经营数据',
   navBGBreakdown: '业务集团拆分',
+  navGlobalView: '全球视图',
   aiAssistant: 'AI 助手',
 
   filterTime: '时间',

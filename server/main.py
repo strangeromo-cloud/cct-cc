@@ -18,6 +18,14 @@ from mock_data import (
     QUARTERS, BUSINESS_GROUPS, GEOGRAPHIES,
 )
 from llm_agent import chat, chat_stream
+from global_data import (
+    get_macro_data,
+    get_supply_chain_data,
+    get_competitive_data,
+    fetch_news,
+)
+from global_summary import stream_global_summary
+from pydantic import BaseModel
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -115,6 +123,56 @@ async def api_chat_stream(req: ChatRequest):
             filters=req.filters,
             history=req.conversationHistory,
         ):
+            yield {"data": chunk}
+
+    return EventSourceResponse(event_generator())
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  Global View APIs — External macro, supply chain, competitive data
+# ══════════════════════════════════════════════════════════════════════
+
+@app.get("/api/global/macro")
+async def api_global_macro(years: int = 5):
+    """Dimension 1: Macro & Capital Environment (Treasury 10Y, NDX P/E, DXY, VIX, EPU)."""
+    return get_macro_data(years)
+
+
+@app.get("/api/global/supply-chain")
+async def api_global_supply_chain(years: int = 5):
+    """Dimension 2: Upstream Cost & Supply Chain (Components, Semi Lead Time, GSCPI)."""
+    return get_supply_chain_data(years)
+
+
+@app.get("/api/global/competitive")
+async def api_global_competitive():
+    """Dimension 3: Competitive Landscape (competitor financials + market share)."""
+    return get_competitive_data()
+
+
+@app.get("/api/global/news")
+async def api_global_news(limit: int = 15):
+    """Latest Lenovo + macro/supply-chain/competitor news (Google News RSS)."""
+    return fetch_news(limit)
+
+
+class GlobalSummaryRequest(BaseModel):
+    macro: dict | None = None
+    supplyChain: dict | None = None
+    competitive: dict | None = None
+
+
+@app.post("/api/global/summary/stream")
+async def api_global_summary_stream(req: GlobalSummaryRequest):
+    """Stream AI-generated CFO summary of external environment data."""
+    data = {
+        "macro": req.macro,
+        "supplyChain": req.supplyChain,
+        "competitive": req.competitive,
+    }
+
+    async def event_generator():
+        async for chunk in stream_global_summary(data):
             yield {"data": chunk}
 
     return EventSourceResponse(event_generator())

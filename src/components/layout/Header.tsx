@@ -10,6 +10,7 @@ export function Header() {
     { to: '/', label: t.navQuarterOverview },
     { to: '/operating', label: t.navOperatingNumbers },
     { to: '/bg-breakdown', label: t.navBGBreakdown },
+    { to: '/global', label: t.navGlobalView },
   ];
 
   return (
