@@ -173,24 +173,14 @@ function MarginComparisonChart({ competitors, source, loading }: { competitors: 
           name: language === 'zh' ? '毛利率' : 'Gross Margin',
           type: 'bar',
           itemStyle: { color: '#0073CE' },
-          data: competitors.map((c) => ({
-            value: c.grossMargin ?? 0,
-            itemStyle: c.name === 'Lenovo'
-              ? { color: '#0073CE', borderColor: '#E12726', borderWidth: 2 }
-              : undefined,
-          })),
+          data: competitors.map((c) => c.grossMargin ?? 0),
           barMaxWidth: 18,
         },
         {
           name: language === 'zh' ? '经营利润率' : 'Operating Margin',
           type: 'bar',
           itemStyle: { color: '#00A650' },
-          data: competitors.map((c) => ({
-            value: c.operatingMargin ?? 0,
-            itemStyle: c.name === 'Lenovo'
-              ? { color: '#00A650', borderColor: '#E12726', borderWidth: 2 }
-              : undefined,
-          })),
+          data: competitors.map((c) => c.operatingMargin ?? 0),
           barMaxWidth: 18,
         },
       ],
