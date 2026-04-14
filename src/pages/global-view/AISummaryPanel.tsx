@@ -3,6 +3,7 @@ import { streamGlobalSummary, type GlobalSummary, type MacroData, type SupplyCha
 import { useLanguage } from '@/hooks/useLanguage';
 import { Card, CardContent } from '@/components/ui/card';
 import { AlertTriangle, Info, AlertCircle, TrendingUp, Sparkles, Loader2 } from 'lucide-react';
+import { ThinkingBlock } from '@/components/ai-chat/MessageBlocks/ThinkingBlock';
 
 interface Props {
   macro: MacroData | null;
@@ -32,7 +33,7 @@ const priorityColor = {
 export function AISummaryPanel({ macro, supplyChain, competitive, ready }: Props) {
   const { language } = useLanguage();
   const [summary, setSummary] = useState<GlobalSummary | null>(null);
-  const [thinking, setThinking] = useState<string>('');
+  const [thinkingSteps, setThinkingSteps] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,7 +44,7 @@ export function AISummaryPanel({ macro, supplyChain, competitive, ready }: Props
     setLoading(true);
     setError(null);
     setSummary(null);
-    setThinking(language === 'zh' ? '准备分析数据...' : 'Preparing analysis...');
+    setThinkingSteps([language === 'zh' ? '准备分析数据...' : 'Preparing analysis...']);
 
     (async () => {
       try {
@@ -51,7 +52,11 @@ export function AISummaryPanel({ macro, supplyChain, competitive, ready }: Props
         for await (const event of stream) {
           if (cancelled) return;
           if (event.type === 'thinking' && event.content) {
-            setThinking(event.content);
+            setThinkingSteps((prev) => {
+              // Dedupe consecutive duplicates in case the backend re-emits
+              if (prev[prev.length - 1] === event.content) return prev;
+              return [...prev, event.content as string];
+            });
           } else if (event.type === 'complete' && event.summary) {
             setSummary(event.summary);
             setLoading(false);
@@ -71,7 +76,7 @@ export function AISummaryPanel({ macro, supplyChain, competitive, ready }: Props
     return () => { cancelled = true; };
   }, [ready, macro, supplyChain, competitive, language]);
 
-  const title = language === 'zh' ? '全球视图 - AI 总结' : 'Global View - AI Summary';
+  const title = language === 'zh' ? '全球视图 - 智能总结' : 'Global View - Smart Summary';
   const snapshotLabel = language === 'zh' ? '现状摘要' : 'Current Snapshot';
   const risksLabel = language === 'zh' ? '风险预警' : 'Risk Alerts';
   const actionsLabel = language === 'zh' ? 'CFO 建议' : 'CFO Actions';
@@ -85,8 +90,11 @@ export function AISummaryPanel({ macro, supplyChain, competitive, ready }: Props
           {loading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
         </div>
 
-        {loading && !summary && (
-          <div className="text-xs text-muted-foreground italic">{thinking}</div>
+        {/* Thinking steps — visible while reasoning, auto-collapses when summary is ready */}
+        {(loading || thinkingSteps.length > 0) && (
+          <div className="mb-2">
+            <ThinkingBlock steps={thinkingSteps} complete={!!summary} />
+          </div>
         )}
 
         {error && (
