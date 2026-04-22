@@ -5,11 +5,14 @@ Serves dashboard data + AI chat with LLM integration.
 import json
 import logging
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
 
-from config import HOST, PORT, CORS_ORIGINS
+from config import (
+    HOST, PORT, CORS_ORIGINS,
+    JOB_TOKEN, SMTP_USER, SMTP_PASSWORD, DIGEST_RECIPIENT,
+)
 from models import FilterState, ChatRequest
 from mock_data import (
     get_opening_data,
@@ -25,6 +28,8 @@ from global_data import (
     fetch_news,
 )
 from global_summary import stream_global_summary
+from ai_news import fetch_ai_news
+from email_sender import send_digest
 from pydantic import BaseModel
 
 logging.basicConfig(level=logging.INFO)
@@ -217,6 +222,52 @@ async def api_global_summary_stream(req: GlobalSummaryRequest):
             yield {"data": chunk}
 
     return EventSourceResponse(event_generator())
+
+
+# ── Scheduled Jobs ────────────────────────────────────────────────────
+def _require_job_token(authorization: str | None) -> None:
+    """Raise 401/503 unless the Authorization header matches JOB_TOKEN."""
+    if not JOB_TOKEN:
+        raise HTTPException(status_code=503, detail="JOB_TOKEN not configured on server")
+    expected = f"Bearer {JOB_TOKEN}"
+    if not authorization or authorization != expected:
+        raise HTTPException(status_code=401, detail="Invalid or missing Bearer token")
+
+
+@app.post("/api/jobs/ai-news-digest")
+async def api_jobs_ai_news_digest(
+    authorization: str | None = Header(default=None),
+    hours: int = Query(24, ge=1, le=168, description="Time window in hours"),
+    dry_run: bool = Query(False, description="Fetch + render only, do not send email"),
+):
+    """
+    Fetch AI news across 4 categories (products / research / business / tools),
+    render an HTML digest, and email it to DIGEST_RECIPIENT via Gmail SMTP.
+
+    Secured with Bearer token (JOB_TOKEN).
+    Invoked by the GitHub Actions workflow `.github/workflows/daily-ai-news.yml`.
+    Can also be triggered manually with `dry_run=true` to preview without sending.
+    """
+    _require_job_token(authorization)
+
+    digest = fetch_ai_news(hours=hours)
+
+    if dry_run:
+        return {"dry_run": True, "digest": digest}
+
+    result = send_digest(
+        digest=digest,
+        smtp_user=SMTP_USER,
+        smtp_password=SMTP_PASSWORD,
+        recipient=DIGEST_RECIPIENT,
+    )
+    return {
+        "dry_run": False,
+        "total": digest.get("total", 0),
+        "window_hours": digest.get("window_hours", hours),
+        "email": result,
+        "counts_by_category": {k: len(v) for k, v in digest.get("by_category", {}).items()},
+    }
 
 
 # ── Run ──────────────────────────────────────────────────────────────
