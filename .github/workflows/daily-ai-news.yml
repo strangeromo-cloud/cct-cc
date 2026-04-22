@@ -1,0 +1,45 @@
+name: Daily AI News Digest
+
+on:
+  schedule:
+    # 01:00 UTC = 09:00 Beijing time. GitHub may delay by 5–15 min during peak load.
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: 'Time window in hours (1–168). Leave default for normal runs.'
+        required: false
+        default: '24'
+      dry_run:
+        description: 'Preview only — do not send the email'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
+
+jobs:
+  send-digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger backend digest endpoint
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}        # e.g. https://cct-backend.zeabur.app
+          JOB_TOKEN:   ${{ secrets.JOB_TOKEN }}
+          HOURS:       ${{ github.event.inputs.hours || '24' }}
+          DRY_RUN:     ${{ github.event.inputs.dry_run || 'false' }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BACKEND_URL:-}" ] || [ -z "${JOB_TOKEN:-}" ]; then
+            echo "::error::Missing BACKEND_URL or JOB_TOKEN secret"
+            exit 1
+          fi
+          URL="${BACKEND_URL%/}/api/jobs/ai-news-digest?hours=${HOURS}&dry_run=${DRY_RUN}"
+          echo "POST $URL"
+          # --fail-with-body: non-2xx exits non-zero but still prints response body
+          curl --fail-with-body -sS -X POST \
+            -H "Authorization: Bearer ${JOB_TOKEN}" \
+            -H "Content-Type: application/json" \
+            "$URL" | tee response.json
+          echo
+          echo "Done."
