@@ -13,7 +13,9 @@ the last 24 hours before being grouped by category.
 """
 from __future__ import annotations
 
+import html
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from urllib.parse import quote
@@ -75,26 +77,25 @@ def _rss_url(query: str, lang: str) -> str:
     return f"https://news.google.com/rss/search?q={q}&hl=en-US&gl=US&ceid=US:en"
 
 
+_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"\s+")
+
+
 def _strip_html(raw: str) -> str:
-    """Remove HTML tags from RSS description, collapse whitespace."""
+    """Remove HTML tags from an RSS description and collapse whitespace.
+
+    Robust against HTML entities (&nbsp;, &amp; etc.) and malformed markup,
+    which is why we use regex + html.unescape rather than an XML parser.
+    """
     if not raw:
         return ""
-    # Drop all tags via regex-free ET trick: wrap & parse
-    try:
-        wrapped = f"<root>{raw}</root>"
-        root = ET.fromstring(wrapped)
-        # Concatenate text content of all descendants
-        parts: list[str] = []
-        for node in root.iter():
-            if node.text:
-                parts.append(node.text)
-            if node.tail:
-                parts.append(node.tail)
-        text = " ".join(parts)
-    except ET.ParseError:
-        text = raw
-    # Collapse whitespace
-    return " ".join(text.split())[:300]
+    # 1. Strip all tags (non-greedy, anything between < and >)
+    text = _TAG_RE.sub(" ", raw)
+    # 2. Decode HTML entities (&nbsp; &amp; &lt; &#39; ...)
+    text = html.unescape(text)
+    # 3. Collapse runs of whitespace
+    text = _WS_RE.sub(" ", text).strip()
+    return text[:300]
 
 
 def fetch_ai_news(hours: int = 24) -> dict:
