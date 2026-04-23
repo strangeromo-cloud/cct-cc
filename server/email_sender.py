@@ -72,6 +72,10 @@ def render_digest_html(digest: dict) -> str:
     total = digest.get("total", 0)
     window = digest.get("window_hours", 24)
     generated_at = _fmt_date(digest.get("generated_at", datetime.now().isoformat()))
+    # Short date+weekday for the header title, in Beijing time
+    now_bj = datetime.now(TZ_SHANGHAI)
+    weekday_cn = "一二三四五六日"[now_bj.weekday()]
+    title_date = f"{now_bj.strftime('%Y-%m-%d')} · 周{weekday_cn}"
 
     blocks: list[str] = []
     for cat in CATEGORY_ORDER:
@@ -134,7 +138,10 @@ def render_digest_html(digest: dict) -> str:
 <body style="margin:0;padding:20px;background:#F7F7F7;font-family:'Helvetica Neue',Arial,'PingFang SC','Microsoft YaHei',sans-serif;color:#222">
   <div style="max-width:680px;margin:0 auto;background:#fff;border-radius:10px;padding:22px 24px 30px;box-shadow:0 1px 4px rgba(0,0,0,0.05)">
     <div style="border-bottom:1px solid #EEE;padding-bottom:14px;margin-bottom:10px">
-      <div style="font-size:20px;font-weight:700;color:#111">Daily AI News Digest</div>
+      <div style="font-size:20px;font-weight:700;color:#111">
+        Daily AI News Digest
+        <span style="font-size:14px;font-weight:500;color:#666;margin-left:8px">{title_date}</span>
+      </div>
       <div style="font-size:12px;color:#888;margin-top:4px">
         生成时间：{generated_at} · 时间窗口：近 {window} 小时 · 共 {total} 条
       </div>
