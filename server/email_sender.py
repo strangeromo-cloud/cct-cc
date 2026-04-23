@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import smtplib
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formataddr, formatdate
@@ -19,6 +19,10 @@ logger = logging.getLogger(__name__)
 
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
+
+# Subject dates are always rendered in Beijing time so the digest matches
+# the recipient's "today" regardless of the server's container timezone.
+TZ_SHANGHAI = timezone(timedelta(hours=8))
 
 # Category label shown in the email body
 CATEGORY_LABELS = {
@@ -187,7 +191,11 @@ def send_digest(
                 "error": "DIGEST_RECIPIENT not configured"}
 
     total = digest.get("total", 0)
-    today_label = datetime.now().astimezone().strftime("%Y-%m-%d")
+    # Always format the subject date in Beijing time so the recipient sees the
+    # correct "today" regardless of where the container runs (Zeabur is UTC).
+    now_bj = datetime.now(TZ_SHANGHAI)
+    weekday_cn = "一二三四五六日"[now_bj.weekday()]
+    today_label = f"{now_bj.strftime('%Y-%m-%d')} (周{weekday_cn})"
     subject = f"{subject_prefix} {today_label} · {total} items"
 
     html = render_digest_html(digest)
