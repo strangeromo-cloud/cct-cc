@@ -170,6 +170,15 @@ def render_digest_text(digest: dict) -> str:
     return "\n".join(lines)
 
 
+def _parse_recipients(raw: str) -> list[str]:
+    """Split a comma/semicolon/whitespace-separated recipient string into a list."""
+    if not raw:
+        return []
+    # Accept ',' ';' or newline as separators; strip whitespace; drop empties.
+    parts = raw.replace(";", ",").replace("\n", ",").split(",")
+    return [p.strip() for p in parts if p.strip()]
+
+
 def send_digest(
     digest: dict,
     smtp_user: str,
@@ -180,14 +189,19 @@ def send_digest(
     """
     Compose + send the digest email via Gmail SMTP.
 
+    `recipient` may be a single address or a comma-separated list.
+    All recipients get the same email in one "To:" line (not BCC).
+
     Returns:
-        { "sent": bool, "recipient": str, "total": int, "error": str | None }
+        { "sent": bool, "recipients": [str], "total": int, "error": str | None }
     """
     if not smtp_user or not smtp_password:
-        return {"sent": False, "recipient": recipient, "total": 0,
+        return {"sent": False, "recipients": [], "total": 0,
                 "error": "SMTP_USER or SMTP_PASSWORD not configured"}
-    if not recipient:
-        return {"sent": False, "recipient": "", "total": 0,
+
+    recipients = _parse_recipients(recipient)
+    if not recipients:
+        return {"sent": False, "recipients": [], "total": 0,
                 "error": "DIGEST_RECIPIENT not configured"}
 
     total = digest.get("total", 0)
@@ -204,7 +218,7 @@ def send_digest(
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = formataddr(("AI News Digest", smtp_user))
-    msg["To"] = recipient
+    msg["To"] = ", ".join(recipients)
     msg["Date"] = formatdate(localtime=True)
     msg.attach(MIMEText(text, "plain", "utf-8"))
     msg.attach(MIMEText(html, "html", "utf-8"))
@@ -215,9 +229,9 @@ def send_digest(
             server.starttls()
             server.ehlo()
             server.login(smtp_user, smtp_password)
-            server.sendmail(smtp_user, [recipient], msg.as_string())
-        logger.info(f"Digest email sent to {recipient} ({total} items)")
-        return {"sent": True, "recipient": recipient, "total": total, "error": None}
+            server.sendmail(smtp_user, recipients, msg.as_string())
+        logger.info(f"Digest email sent to {recipients} ({total} items)")
+        return {"sent": True, "recipients": recipients, "total": total, "error": None}
     except Exception as e:
         logger.exception(f"Failed to send digest email: {e}")
-        return {"sent": False, "recipient": recipient, "total": total, "error": f"{type(e).__name__}: {e}"}
+        return {"sent": False, "recipients": recipients, "total": total, "error": f"{type(e).__name__}: {e}"}
