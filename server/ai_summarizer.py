@@ -14,7 +14,10 @@ All item dicts are mutated in place with:
 """
 from __future__ import annotations
 
+import html as _html_module
+import json
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
@@ -89,6 +92,111 @@ def resolve_article_url(google_news_url: str) -> str | None:
     return None
 
 
+# ── Meta / JSON-LD fallback ──────────────────────────────────────────
+# Used when trafilatura returns nothing — common for JS-rendered sites
+# (Anthropic, TechCrunch, The Verge etc.). These sites ship a static HTML
+# shell, but meta tags and JSON-LD structured data are still present and
+# usually contain a 150-400 char article description.
+
+# Matches both `property="og:description" ... content="..."` and reversed order.
+def _build_meta_re(key_attr: str, key_val: str) -> list[re.Pattern]:
+    forward = rf'''<meta\s+(?:[^>]*?\s+)?{key_attr}\s*=\s*["']{key_val}["']\s+[^>]*?content\s*=\s*["']([^"']+)["']'''
+    reverse = rf'''<meta\s+(?:[^>]*?\s+)?content\s*=\s*["']([^"']+)["']\s+[^>]*?{key_attr}\s*=\s*["']{key_val}["']'''
+    return [re.compile(forward, re.IGNORECASE), re.compile(reverse, re.IGNORECASE)]
+
+
+_META_PATTERNS = (
+    _build_meta_re("property", "og:description")
+    + _build_meta_re("name", "twitter:description")
+    + _build_meta_re("name", "description")
+)
+_JSON_LD_RE = re.compile(
+    r'<script[^>]*type\s*=\s*["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+    re.DOTALL | re.IGNORECASE,
+)
+# Also extract the first few <p> blocks inside <article> as a last resort.
+_ARTICLE_P_RE = re.compile(
+    r'<article[^>]*>(.*?)</article>',
+    re.DOTALL | re.IGNORECASE,
+)
+_P_RE = re.compile(r'<p[^>]*>(.*?)</p>', re.DOTALL | re.IGNORECASE)
+_STRIP_TAGS_RE = re.compile(r'<[^>]+>')
+
+
+def _clean_html_text(text: str) -> str:
+    text = _STRIP_TAGS_RE.sub(" ", text)
+    text = _html_module.unescape(text)
+    return " ".join(text.split())
+
+
+def _walk_jsonld(obj, collector: list[str]) -> None:
+    """Recursively pull articleBody / description / headline fields out of JSON-LD."""
+    if isinstance(obj, list):
+        for x in obj:
+            _walk_jsonld(x, collector)
+    elif isinstance(obj, dict):
+        for key in ("articleBody", "description", "headline"):
+            val = obj.get(key)
+            if isinstance(val, str) and len(val) >= 30:
+                collector.append(val.strip())
+        for val in obj.values():
+            if isinstance(val, (dict, list)):
+                _walk_jsonld(val, collector)
+
+
+def _extract_meta_fallback(html_content: str) -> str | None:
+    """
+    Stitch together article context from meta tags, JSON-LD, and the first
+    few <article> <p> blocks. Returns a single concatenated string or None
+    if nothing useful could be found.
+    """
+    snippets: list[str] = []
+    seen_prefixes: set[str] = set()
+
+    def add(raw: str | None):
+        if not raw:
+            return
+        text = _clean_html_text(raw)
+        if len(text) < 30:
+            return
+        prefix = text[:120]
+        if prefix in seen_prefixes:
+            return
+        seen_prefixes.add(prefix)
+        snippets.append(text)
+
+    # 1. Meta tags (og, twitter, plain description) — both attribute orders
+    for pattern in _META_PATTERNS:
+        m = pattern.search(html_content)
+        if m:
+            add(m.group(1))
+
+    # 2. JSON-LD structured data
+    for m in _JSON_LD_RE.finditer(html_content):
+        raw = m.group(1).strip()
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        ld_snips: list[str] = []
+        _walk_jsonld(data, ld_snips)
+        for s in ld_snips:
+            add(s)
+
+    # 3. <article>…<p>…</p></article> fallback — grab a couple of body paragraphs
+    for article_match in _ARTICLE_P_RE.finditer(html_content):
+        ps = _P_RE.findall(article_match.group(1))
+        for p in ps[:4]:
+            add(p)
+        if snippets:
+            break
+
+    if not snippets:
+        return None
+    combined = "\n\n".join(snippets)
+    return combined[:5000]
+
+
 def fetch_article_text(url: str, debug: bool = False) -> str | dict | None:
     """
     Download the article and extract the main text via trafilatura.
@@ -124,10 +232,11 @@ def fetch_article_text(url: str, debug: bool = False) -> str | dict | None:
         logger.info(f"fetch_article_text GET failed for {url[:80]}: {e}")
         return diag if debug else None
 
-    # Step 2: extract main article body. favor_recall is more lenient for news
-    # sites that wrap the body in unusual DOM structures.
+    # Step 2a: extract main article body via trafilatura. favor_recall is more
+    # lenient for news sites with non-standard DOM.
+    trafilatura_text: str | None = None
     try:
-        text = trafilatura.extract(
+        trafilatura_text = trafilatura.extract(
             html_content,
             url=url,
             favor_recall=True,
@@ -135,25 +244,46 @@ def fetch_article_text(url: str, debug: bool = False) -> str | dict | None:
             include_tables=False,
             deduplicate=True,
         )
+        if trafilatura_text:
+            trafilatura_text = trafilatura_text.strip()
     except Exception as e:
-        diag["error"] = f"trafilatura.extract raised: {type(e).__name__}: {e}"
-        logger.info(diag["error"])
+        diag["trafilatura_error"] = f"{type(e).__name__}: {e}"
+        logger.info(f"trafilatura.extract raised for {url[:80]}: {e}")
+
+    diag["trafilatura_chars"] = len(trafilatura_text or "")
+
+    # Step 2b: fallback — pull meta / JSON-LD / <article> content from the HTML.
+    # Common for JS-rendered sites (Anthropic, TechCrunch, The Verge) where
+    # trafilatura only sees a static shell.
+    meta_text: str | None = None
+    if not trafilatura_text or len(trafilatura_text) < 200:
+        try:
+            meta_text = _extract_meta_fallback(html_content)
+        except Exception as e:
+            diag["meta_error"] = f"{type(e).__name__}: {e}"
+            logger.info(f"meta fallback raised for {url[:80]}: {e}")
+    diag["meta_chars"] = len(meta_text or "")
+
+    # Pick the better of the two
+    if trafilatura_text and len(trafilatura_text) >= 200:
+        text = trafilatura_text
+        source = "trafilatura"
+    elif meta_text and len(meta_text) >= 150:
+        text = meta_text
+        source = "meta"
+    else:
+        diag["error"] = (
+            f"both extractions too short "
+            f"(trafilatura={len(trafilatura_text or '')}, meta={len(meta_text or '')})"
+        )
         return diag if debug else None
 
-    if not text:
-        diag["error"] = "trafilatura returned None"
-        return diag if debug else None
-
-    text = text.strip()
+    diag["extract_source"] = source
     diag["extracted_chars"] = len(text)
-    diag["extracted_preview"] = text[:200]
-
-    if len(text) < 200:
-        diag["error"] = f"extraction too short ({len(text)} chars)"
-        return diag if debug else None
+    diag["extracted_preview"] = text[:300]
+    diag["ok"] = True
 
     truncated = text[:MAX_ARTICLE_CHARS]
-    diag["ok"] = True
     return diag if debug else truncated
 
 
@@ -168,6 +298,7 @@ _PROMPT_ZH = """你是一名资深 AI 行业编辑。请根据下面这则新闻
 - 聚焦「发生了什么」+「为什么重要」
 - 不使用套话（如「业内人士认为」「值得关注」等）
 - 不要加表情、不要加开头结尾的寒暄
+- **仅基于所给正文中的信息**；正文信息很少时允许只输出 1 句话，**严禁编造**任何未提及的数字、日期、人名或细节
 - 直接输出摘要本身，不要任何前缀
 
 标题：{title}
@@ -183,6 +314,7 @@ Requirements:
 - Focus on "what happened" + "why it matters"
 - No fluff phrases ("notably", "it's worth noting", etc.)
 - No emojis, no opening/closing pleasantries
+- **Base the summary only on information in the provided text**; if the text is sparse, a single sentence is fine — do NOT fabricate numbers, dates, names, or details that weren't stated
 - Output only the summary itself, no prefix
 
 Title: {title}
