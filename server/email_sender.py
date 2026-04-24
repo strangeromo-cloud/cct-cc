@@ -24,11 +24,11 @@ SMTP_PORT = 587
 # the recipient's "today" regardless of the server's container timezone.
 TZ_SHANGHAI = timezone(timedelta(hours=8))
 
-# Category labels shown in the email body — English + Chinese
+# Category labels shown in the email body — Chinese only
 CATEGORY_LABELS = {
-    "model_product": ("Models & Products", "模型 / 产品"),
-    "business":      ("Business",          "商业应用"),
-    "policy_risk":   ("Policy & Risk",     "政策 / 风险"),
+    "model_product": "模型 / 产品",
+    "business":      "商业应用",
+    "policy_risk":   "政策 / 风险",
 }
 
 # Accent color per category
@@ -83,28 +83,40 @@ def render_digest_html(digest: dict) -> str:
             # placeholder rows, no "no items today" filler.
             continue
 
-        en_label, zh_label = CATEGORY_LABELS[cat]
+        zh_label = CATEGORY_LABELS[cat]
         color = CATEGORY_COLORS[cat]
 
         header = (
             f'<h2 style="margin:28px 0 10px;padding:6px 12px;border-left:4px solid {color};'
             f'font-size:16px;color:#111;">'
-            f'{en_label} <span style="color:#888;font-weight:400">· {zh_label}</span>'
+            f'{zh_label}'
             f' <span style="color:#888;font-weight:400;font-size:13px">({len(items)})</span></h2>'
         )
 
         cards: list[str] = []
         for it in items:
-            title = escape(it.get("title", ""))
+            original_title = it.get("title", "") or ""
+            # For EN-language items we show the LLM-translated Chinese title and
+            # keep the original as a smaller secondary line so the reader still
+            # sees the real publisher headline before clicking through.
+            title_zh = (it.get("title_zh") or "").strip()
+            display_title = escape(title_zh or original_title)
+            original_subtitle = ""
+            lang = it.get("lang", "en")
+            if title_zh and original_title and lang == "en":
+                original_subtitle = (
+                    f'<div style="font-size:11px;color:#999;font-style:italic;'
+                    f'margin:2px 0 6px 0;line-height:1.4">{escape(original_title)}</div>'
+                )
+
             # Prefer the resolved publisher URL if we have it, else the Google News link
             href = escape(it.get("resolved_url") or it.get("link", ""), quote=True)
             src = escape(it.get("source", ""))
-            # `summary` is the LLM-rendered blurb when available, else RSS description
+            # `summary` is the Chinese LLM summary when available, else RSS fallback
             summary_text = it.get("summary") or it.get("description", "")
             summary = escape(summary_text)
             date = escape(_fmt_date(it.get("publishedAt", "")))
-            tag = escape(en_label)
-            lang = it.get("lang", "en")
+            tag = escape(zh_label)
             lang_badge = "EN" if lang == "en" else "中"
             lang_bg = "#EEF4FA" if lang == "en" else "#FDEEEE"
             lang_color = "#0073CE" if lang == "en" else "#E12726"
@@ -118,8 +130,9 @@ def render_digest_html(digest: dict) -> str:
             cards.append(f"""
 <div style="margin:0 0 14px;padding:12px 14px;border:1px solid #E5E5E5;border-radius:8px;background:#fff">
   <div style="margin-bottom:6px">
-    <a href="{href}" style="color:#111;text-decoration:none;font-weight:600;font-size:14px;line-height:1.45">{title}</a>
+    <a href="{href}" style="color:#111;text-decoration:none;font-weight:600;font-size:14px;line-height:1.45">{display_title}</a>
   </div>
+  {original_subtitle}
   <div style="font-size:11px;color:#888;margin-bottom:6px">
     <span>{date}</span>
     <span style="margin:0 6px">·</span>
@@ -172,11 +185,14 @@ def render_digest_text(digest: dict) -> str:
         items = by_category.get(cat, [])
         if not items:
             continue  # skip empty categories
-        en, zh = CATEGORY_LABELS[cat]
-        lines.append(f"=== {en} / {zh} ({len(items)}) ===")
+        zh = CATEGORY_LABELS[cat]
+        lines.append(f"=== {zh} ({len(items)}) ===")
         for it in items:
-            lines.append(f"• {it.get('title')}  [{_fmt_date(it.get('publishedAt', ''))}]")
-            lines.append(f"  {it.get('source')}  #{en}  ({it.get('lang')})")
+            display_title = (it.get("title_zh") or "").strip() or it.get("title", "")
+            lines.append(f"• {display_title}  [{_fmt_date(it.get('publishedAt', ''))}]")
+            if it.get("title_zh") and it.get("lang") == "en":
+                lines.append(f"  (原: {it.get('title')})")
+            lines.append(f"  {it.get('source')}  #{zh}  ({it.get('lang')})")
             summary = it.get("summary") or it.get("description", "")
             if summary:
                 lines.append(f"  {summary}")

@@ -348,19 +348,25 @@ _PROMPT_ZH = """你是一名资深 AI 行业编辑。请根据下面这则新闻
 {text}
 """
 
-_PROMPT_EN = """You are a senior AI industry editor. Write a concise **English summary** of the following news article.
+# English articles: ask the LLM to produce both a translated Chinese title
+# and a Chinese summary in one shot, returned as JSON so we can parse them
+# separately. This saves a second API round-trip.
+_PROMPT_EN_TO_ZH = """你是一名资深 AI 行业编辑。下面是一则英文 AI 新闻。请完成两件事：
 
-Requirements:
-- 2-3 sentences, maximum 60 words
-- Focus on "what happened" + "why it matters"
-- No fluff phrases ("notably", "it's worth noting", etc.)
-- No emojis, no opening/closing pleasantries
-- **Base the summary only on information in the provided text**; if the text is sparse, a single sentence is fine — do NOT fabricate numbers, dates, names, or details that weren't stated
-- Output only the summary itself, no prefix
+1) **把英文标题翻译成自然的中文标题**。要求简洁、符合中文新闻标题习惯，不要逐字直译。
+2) **根据正文写一段中文摘要**：2-3 句、不超过 120 字，聚焦「发生了什么 + 为什么重要」。
 
-Title: {title}
-Source: {source}
-Article:
+严格要求：
+- 仅基于所给正文中的信息，**严禁编造**任何数字、日期、人名、机构或未提及的细节
+- 正文信息稀少时摘要可以只写 1 句，不要凑字数
+- 不使用套话（如「值得关注」「业内人士认为」等），不加表情，不加任何前后缀
+- **严格按下面的 JSON 格式输出**，不要在 JSON 外输出任何其他文字、注释或 Markdown code fence：
+
+{{"title_zh": "<中文标题>", "summary_zh": "<中文摘要>"}}
+
+英文标题：{title}
+来源：{source}
+英文正文：
 {text}
 """
 
@@ -371,50 +377,95 @@ def _get_llm_client():
     return OpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL, timeout=LLM_TIMEOUT)
 
 
-def summarize_article(title: str, text: str, source: str, lang: str) -> str | None:
-    """
-    Ask the LLM for a concise summary. Returns None on any failure.
-    `lang` should be "zh" or "en" — matches the source language of the article.
-    """
+def _call_llm(prompt: str, max_out: int = 420) -> str | None:
+    """Thin wrapper around chat.completions.create with param-name fallback."""
     if not LLM_API_KEY:
         logger.warning("LLM_API_KEY not configured — summarization disabled")
         return None
-
-    template = _PROMPT_ZH if lang == "zh" else _PROMPT_EN
-    prompt = template.format(title=title, source=source, text=text)
-
     try:
         client = _get_llm_client()
-        # Newer OpenAI models (gpt-5.x, o-series) require `max_completion_tokens`
-        # instead of the legacy `max_tokens`. Try the new name first and fall
-        # back to the old one if the server rejects it (third-party OpenAI-
-        # compatible providers that haven't caught up yet).
         kwargs = dict(
             model=LLM_MODEL,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
         )
+        # gpt-5.x / o-series require max_completion_tokens, legacy uses max_tokens.
         try:
-            resp = client.chat.completions.create(max_completion_tokens=260, **kwargs)
+            resp = client.chat.completions.create(max_completion_tokens=max_out, **kwargs)
         except Exception as e:
-            # Detect "unsupported parameter: max_completion_tokens" and retry.
             if "max_completion_tokens" in str(e).lower():
-                resp = client.chat.completions.create(max_tokens=260, **kwargs)
+                resp = client.chat.completions.create(max_tokens=max_out, **kwargs)
             else:
                 raise
-        choice = resp.choices[0].message.content or ""
-        summary = choice.strip()
-        if not summary:
-            return None
-        # Guardrails: occasionally the model prepends "摘要：" — strip it.
-        for prefix in ("摘要：", "摘要:", "Summary:", "**摘要**", "## 摘要"):
-            if summary.startswith(prefix):
-                summary = summary[len(prefix):].strip()
-                break
-        return summary
+        return (resp.choices[0].message.content or "").strip() or None
     except Exception as e:
-        logger.warning(f"LLM summarization failed: {type(e).__name__}: {e}")
+        logger.warning(f"LLM call failed: {type(e).__name__}: {e}")
         return None
+
+
+_PREFIX_STRIPS = ("摘要：", "摘要:", "Summary:", "**摘要**", "## 摘要")
+
+
+def _strip_prefix(s: str) -> str:
+    for p in _PREFIX_STRIPS:
+        if s.startswith(p):
+            return s[len(p):].strip()
+    return s
+
+
+def summarize_zh(title: str, text: str, source: str) -> str | None:
+    """Summarize a Chinese-language article into a Chinese summary."""
+    out = _call_llm(_PROMPT_ZH.format(title=title, source=source, text=text))
+    return _strip_prefix(out) if out else None
+
+
+def summarize_and_translate_en(title: str, text: str, source: str) -> dict | None:
+    """
+    For an English-language article, produce both:
+      - title_zh    : a Chinese translation of the title
+      - summary_zh  : a Chinese summary of the article body
+
+    Returns a dict with those two keys, or None on failure. If the LLM returns
+    prose instead of JSON, we fall back to {"title_zh": None, "summary_zh": prose}
+    so the caller can at least use the Chinese summary.
+    """
+    out = _call_llm(_PROMPT_EN_TO_ZH.format(title=title, source=source, text=text))
+    if not out:
+        return None
+
+    # Strip optional markdown fences the model sometimes adds despite being told
+    # not to: ```json ... ```, ``` ... ```
+    cleaned = out.strip()
+    if cleaned.startswith("```"):
+        # drop first line of fence, and trailing fence
+        lines = cleaned.splitlines()
+        if lines:
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        cleaned = "\n".join(lines).strip()
+
+    try:
+        data = json.loads(cleaned)
+    except (json.JSONDecodeError, ValueError):
+        # Fallback: treat the whole thing as summary, leave title untranslated.
+        logger.info("summarize_and_translate_en: LLM returned non-JSON; using raw as summary")
+        return {"title_zh": None, "summary_zh": _strip_prefix(cleaned)}
+
+    title_zh = (data.get("title_zh") or "").strip() or None
+    summary_zh = (data.get("summary_zh") or "").strip() or None
+    if not summary_zh:
+        return None
+    return {"title_zh": title_zh, "summary_zh": _strip_prefix(summary_zh)}
+
+
+# ── Back-compat alias (used by /api/jobs/debug/summarize) ────────────
+def summarize_article(title: str, text: str, source: str, lang: str) -> str | None:
+    """Legacy single-string API kept for the debug endpoint."""
+    if lang == "zh":
+        return summarize_zh(title, text, source)
+    result = summarize_and_translate_en(title, text, source)
+    return result["summary_zh"] if result else None
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -453,20 +504,35 @@ def _process_one(item: dict) -> dict:
     effective_url = final_url or link
     article_text = fetch_article_text(final_url) if final_url else None
 
-    # Step 3: produce a summary. Order of preference:
+    # Step 3: produce a Chinese summary (and, for EN sources, a Chinese title
+    # translation — done in the same LLM call via JSON output).
+    #
+    # Order of preference:
     #   (a) LLM over the full article body
     #   (b) LLM over the RSS description (only if it has real content, not
     #       just "Title Source" filler from Google News)
-    #   (c) meaningful RSS description verbatim
+    #   (c) meaningful RSS description verbatim (always Chinese will not
+    #       happen here — falls back to original language)
     #   (d) nothing (the email will simply omit the summary line)
     summary: str | None = None
+    title_zh: str | None = None
     src = "none"
+
+    def _llm_from(body: str) -> tuple[str | None, str | None]:
+        """Return (summary_zh, title_zh) or (None, None)."""
+        if lang == "zh":
+            return summarize_zh(title, body, source), None
+        result = summarize_and_translate_en(title, body, source)
+        if not result:
+            return None, None
+        return result.get("summary_zh"), result.get("title_zh")
+
     if article_text:
-        summary = summarize_article(title, article_text, source, lang)
+        summary, title_zh = _llm_from(article_text)
         if summary:
             src = "llm"
     if not summary and not _is_trivial_description(rss_desc, title, source):
-        summary = summarize_article(title, rss_desc, source, lang)
+        summary, title_zh = _llm_from(rss_desc)
         if summary:
             src = "llm"
         else:
@@ -475,6 +541,7 @@ def _process_one(item: dict) -> dict:
 
     item["summary"] = summary or ""
     item["summary_src"] = src
+    item["title_zh"] = title_zh  # None for ZH-language items; populated for EN
     item["resolved_url"] = effective_url
     return item
 
