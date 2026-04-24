@@ -24,23 +24,21 @@ SMTP_PORT = 587
 # the recipient's "today" regardless of the server's container timezone.
 TZ_SHANGHAI = timezone(timedelta(hours=8))
 
-# Category label shown in the email body
+# Category labels shown in the email body — English + Chinese
 CATEGORY_LABELS = {
-    "ai_products": ("AI Products", "产品发布"),
-    "ai_research": ("AI Research", "技术研究"),
-    "ai_business": ("AI Business", "商业应用"),
-    "ai_tools":    ("AI Tools",    "工具更新"),
+    "model_product": ("Models & Products", "模型 / 产品"),
+    "business":      ("Business",          "商业应用"),
+    "policy_risk":   ("Policy & Risk",     "政策 / 风险"),
 }
 
-# Category accent colors (matches Lenovo theme vibes)
+# Accent color per category
 CATEGORY_COLORS = {
-    "ai_products": "#E12726",   # red
-    "ai_research": "#0073CE",   # blue
-    "ai_business": "#00A650",   # green
-    "ai_tools":    "#F5A623",   # orange
+    "model_product": "#0073CE",   # blue
+    "business":      "#00A650",   # green
+    "policy_risk":   "#E12726",   # red
 }
 
-CATEGORY_ORDER = ["ai_products", "ai_research", "ai_business", "ai_tools"]
+CATEGORY_ORDER = ["model_product", "business", "policy_risk"]
 
 
 def _fmt_date(iso_str: str) -> str:
@@ -80,6 +78,11 @@ def render_digest_html(digest: dict) -> str:
     blocks: list[str] = []
     for cat in CATEGORY_ORDER:
         items = by_category.get(cat, [])
+        if not items:
+            # Per product requirement: skip empty categories entirely — no
+            # placeholder rows, no "no items today" filler.
+            continue
+
         en_label, zh_label = CATEGORY_LABELS[cat]
         color = CATEGORY_COLORS[cat]
 
@@ -90,27 +93,32 @@ def render_digest_html(digest: dict) -> str:
             f' <span style="color:#888;font-weight:400;font-size:13px">({len(items)})</span></h2>'
         )
 
-        if not items:
-            blocks.append(header + '<p style="color:#888;font-size:13px;margin:0 0 8px 12px">（今日暂无）</p>')
-            continue
-
         cards: list[str] = []
         for it in items:
             title = escape(it.get("title", ""))
-            link = escape(it.get("link", ""), quote=True)
+            # Prefer the resolved publisher URL if we have it, else the Google News link
+            href = escape(it.get("resolved_url") or it.get("link", ""), quote=True)
             src = escape(it.get("source", ""))
-            desc = escape(it.get("description", ""))
+            # `summary` is the LLM-rendered blurb when available, else RSS description
+            summary_text = it.get("summary") or it.get("description", "")
+            summary = escape(summary_text)
             date = escape(_fmt_date(it.get("publishedAt", "")))
             tag = escape(en_label)
             lang = it.get("lang", "en")
             lang_badge = "EN" if lang == "en" else "中"
             lang_bg = "#EEF4FA" if lang == "en" else "#FDEEEE"
             lang_color = "#0073CE" if lang == "en" else "#E12726"
+            src_provenance = it.get("summary_src", "")
+            src_label_html = ""
+            if src_provenance == "llm":
+                src_label_html = '<span style="margin-left:6px;font-size:10px;color:#888;font-style:italic">AI 摘要</span>'
+            elif src_provenance == "rss":
+                src_label_html = '<span style="margin-left:6px;font-size:10px;color:#bbb;font-style:italic">RSS</span>'
 
             cards.append(f"""
 <div style="margin:0 0 14px;padding:12px 14px;border:1px solid #E5E5E5;border-radius:8px;background:#fff">
   <div style="margin-bottom:6px">
-    <a href="{link}" style="color:#111;text-decoration:none;font-weight:600;font-size:14px;line-height:1.45">{title}</a>
+    <a href="{href}" style="color:#111;text-decoration:none;font-weight:600;font-size:14px;line-height:1.45">{title}</a>
   </div>
   <div style="font-size:11px;color:#888;margin-bottom:6px">
     <span>{date}</span>
@@ -119,9 +127,10 @@ def render_digest_html(digest: dict) -> str:
     <span style="margin:0 6px">·</span>
     <span style="display:inline-block;padding:1px 6px;border-radius:3px;background:{lang_bg};color:{lang_color};font-weight:600">{lang_badge}</span>
     <span style="margin-left:6px;display:inline-block;padding:1px 6px;border-radius:3px;background:{color}15;color:{color};font-weight:600">#{tag}</span>
+    {src_label_html}
   </div>
-  {f'<div style="font-size:12px;color:#555;line-height:1.5;margin-bottom:8px">{desc}</div>' if desc else ''}
-  <a href="{link}" style="font-size:11px;color:{color};text-decoration:none">阅读原文 →</a>
+  {f'<div style="font-size:13px;color:#333;line-height:1.55;margin-bottom:8px">{summary}</div>' if summary else ''}
+  <a href="{href}" style="font-size:11px;color:{color};text-decoration:none">阅读原文 →</a>
 </div>
 """)
 
@@ -161,17 +170,17 @@ def render_digest_text(digest: dict) -> str:
     lines: list[str] = [f"Daily AI News Digest ({digest.get('total', 0)} items)", ""]
     for cat in CATEGORY_ORDER:
         items = by_category.get(cat, [])
+        if not items:
+            continue  # skip empty categories
         en, zh = CATEGORY_LABELS[cat]
         lines.append(f"=== {en} / {zh} ({len(items)}) ===")
-        if not items:
-            lines.append("（今日暂无）")
         for it in items:
             lines.append(f"• {it.get('title')}  [{_fmt_date(it.get('publishedAt', ''))}]")
             lines.append(f"  {it.get('source')}  #{en}  ({it.get('lang')})")
-            desc = it.get("description", "")
-            if desc:
-                lines.append(f"  {desc}")
-            lines.append(f"  {it.get('link')}")
+            summary = it.get("summary") or it.get("description", "")
+            if summary:
+                lines.append(f"  {summary}")
+            lines.append(f"  {it.get('resolved_url') or it.get('link')}")
             lines.append("")
         lines.append("")
     return "\n".join(lines)

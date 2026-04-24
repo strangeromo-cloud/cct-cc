@@ -2,8 +2,8 @@ name: Daily AI News Digest
 
 on:
   schedule:
-    # 01:00 UTC = 09:00 Beijing time. GitHub may delay by 5–15 min during peak load.
-    - cron: '0 1 * * *'
+    # 00:30 UTC = 08:30 Beijing time. GitHub may delay by 5–15 min during peak load.
+    - cron: '30 0 * * *'
   workflow_dispatch:
     inputs:
       hours:
@@ -20,7 +20,9 @@ on:
 jobs:
   send-digest:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Summarization runs LLM calls for ~12 items via Zeabur; allow headroom
+    # so a single slow publisher doesn't abort the whole job.
+    timeout-minutes: 15
     steps:
       - name: Trigger backend digest endpoint
         env:
@@ -36,8 +38,10 @@ jobs:
           fi
           URL="${BACKEND_URL%/}/api/jobs/ai-news-digest?hours=${HOURS}&dry_run=${DRY_RUN}"
           echo "POST $URL"
-          # --fail-with-body: non-2xx exits non-zero but still prints response body
-          curl --fail-with-body -sS -X POST \
+          # Endpoint fetches articles + runs LLM summaries for ~12 items; allow
+          # up to 10 minutes before giving up. --fail-with-body surfaces non-2xx
+          # responses with their body for easier debugging.
+          curl --fail-with-body -sS --max-time 600 -X POST \
             -H "Authorization: Bearer ${JOB_TOKEN}" \
             -H "Content-Type: application/json" \
             "$URL" | tee response.json

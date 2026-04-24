@@ -13,3 +13,7 @@ openpyxl>=3.1.0
 # NY Fed serves GSCPI as legacy .xls while pandas + xlrd can no longer
 # handle that format (xlrd>=2.0 dropped .xls support).
 python-calamine>=0.2.3
+
+# trafilatura extracts the main article body from news HTML. Used by the
+# daily AI news digest job to fetch full article text before LLM summarization.
+trafilatura>=1.12.0

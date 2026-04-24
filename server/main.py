@@ -28,7 +28,8 @@ from global_data import (
     fetch_news,
 )
 from global_summary import stream_global_summary
-from ai_news import fetch_ai_news
+from ai_news import fetch_and_select
+from ai_summarizer import summarize_batch
 from email_sender import send_digest
 from pydantic import BaseModel
 
@@ -239,18 +240,33 @@ async def api_jobs_ai_news_digest(
     authorization: str | None = Header(default=None),
     hours: int = Query(24, ge=1, le=168, description="Time window in hours"),
     dry_run: bool = Query(False, description="Fetch + render only, do not send email"),
+    skip_summary: bool = Query(False, description="Skip LLM summarization (faster preview)"),
 ):
     """
-    Fetch AI news across 4 categories (products / research / business / tools),
-    render an HTML digest, and email it to DIGEST_RECIPIENT via Gmail SMTP.
+    Produce + send the daily AI news digest.
+
+    Pipeline:
+      1. fetch_and_select() — bilingual RSS fetch, cross-category dedup by
+         fuzzy title match, top-N per category by source authority + recency.
+      2. summarize_batch()   — for each selected item: follow Google News
+         redirect → trafilatura extract → LLM summary (CN for zh items,
+         EN for en items). Falls back to RSS description on failure.
+      3. send_digest()       — render HTML + send via Gmail SMTP.
 
     Secured with Bearer token (JOB_TOKEN).
-    Invoked by the GitHub Actions workflow `.github/workflows/daily-ai-news.yml`.
-    Can also be triggered manually with `dry_run=true` to preview without sending.
+    Invoked daily by GitHub Actions `.github/workflows/daily-ai-news.yml`.
+
+    Params:
+      - hours        : lookback window (default 24)
+      - dry_run      : true = return the rendered digest, do not email
+      - skip_summary : true = skip the expensive LLM step (faster previews)
     """
     _require_job_token(authorization)
 
-    digest = fetch_ai_news(hours=hours)
+    digest = fetch_and_select(hours=hours)
+
+    if not skip_summary:
+        summarize_batch(digest)
 
     if dry_run:
         return {"dry_run": True, "digest": digest}
@@ -265,6 +281,9 @@ async def api_jobs_ai_news_digest(
         "dry_run": False,
         "total": digest.get("total", 0),
         "window_hours": digest.get("window_hours", hours),
+        "raw_total": digest.get("raw_total"),
+        "unique_total": digest.get("unique_total"),
+        "summary_stats": digest.get("summary_stats"),
         "email": result,
         "counts_by_category": {k: len(v) for k, v in digest.get("by_category", {}).items()},
     }

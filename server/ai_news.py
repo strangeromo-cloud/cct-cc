@@ -1,135 +1,208 @@
 """
-AI News Fetcher — Google News RSS with 4-category classification.
+AI News Fetcher — Google News RSS with 3-category taxonomy and dedup.
 
 Categories:
-  - ai_products : 产品发布 (new model / product launches)
-  - ai_research : 技术研究 (papers, benchmarks, evaluations)
-  - ai_business : 商业应用 (enterprise adoption, revenue, earnings)
-  - ai_tools    : 工具更新 (coding tools, agent frameworks, IDE plugins)
+  - model_product : 模型 / 产品      (target: 5 items)
+  - business      : 商业应用         (target: 5 items)
+  - policy_risk   : 政策 / 风险      (target: 2 items)
 
-Each category is queried in both English (global coverage) and Chinese
-(domestic coverage). Results are deduplicated by link and filtered to
-the last 24 hours before being grouped by category.
+Pipeline:
+  1. fetch_ai_news_raw()        — broad fetch (~50-100 items) via bilingual queries
+  2. dedup_and_rank()            — group by fuzzy title match; keep most authoritative
+  3. select_top_per_category()   — top N per category by (authority desc, date desc)
+  4. Caller summarizes selected items via ai_summarizer.summarize_batch()
+
+Empty categories are omitted downstream (no "no items" placeholders).
 """
 from __future__ import annotations
 
 import html
 import logging
 import re
+from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from difflib import SequenceMatcher
 from email.utils import parsedate_to_datetime
 from urllib.parse import quote
 from xml.etree import ElementTree as ET
 
 logger = logging.getLogger(__name__)
 
-# Beijing time — used for "today" labeling in the email
 TZ_SHANGHAI = timezone(timedelta(hours=8))
 
-# ── Query set ─────────────────────────────────────────────────────────
-# (query, category, language)
-AI_NEWS_QUERIES: list[tuple[str, str, str]] = [
-    # AI Products — 产品发布
-    ("OpenAI new model release", "ai_products", "en"),
-    ("Anthropic Claude release", "ai_products", "en"),
-    ("Google Gemini new model", "ai_products", "en"),
-    ("Meta Llama release", "ai_products", "en"),
-    ("大模型 发布 新品", "ai_products", "zh"),
-    ("OpenAI 新品 发布", "ai_products", "zh"),
+# ══════════════════════════════════════════════════════════════════════
+#  Categories
+# ══════════════════════════════════════════════════════════════════════
 
-    # AI Research — 技术研究
-    ("LLM research paper arxiv", "ai_research", "en"),
-    ("AI model benchmark evaluation", "ai_research", "en"),
-    ("reasoning model breakthrough", "ai_research", "en"),
-    ("大模型 论文 研究", "ai_research", "zh"),
-    ("AI 前沿 研究", "ai_research", "zh"),
-
-    # AI Business — 商业应用
-    ("enterprise AI adoption", "ai_business", "en"),
-    ("OpenAI Anthropic revenue earnings", "ai_business", "en"),
-    ("AI investment funding round", "ai_business", "en"),
-    ("企业 AI 落地 应用", "ai_business", "zh"),
-    ("AI 商业化 融资", "ai_business", "zh"),
-
-    # AI Tools — 工具更新
-    ("Cursor Copilot AI coding update", "ai_tools", "en"),
-    ("AI agent framework release", "ai_tools", "en"),
-    ("Claude Code Gemini CLI update", "ai_tools", "en"),
-    ("AI 编程 工具 更新", "ai_tools", "zh"),
-    ("AI Agent 框架 开源", "ai_tools", "zh"),
-]
-
-CATEGORY_LABELS_ZH = {
-    "ai_products": "AI Products（产品发布）",
-    "ai_research": "AI Research（技术研究）",
-    "ai_business": "AI Business（商业应用）",
-    "ai_tools":    "AI Tools（工具更新）",
+# (category_key, target_count)
+CATEGORY_TARGETS: dict[str, int] = {
+    "model_product": 5,
+    "business":      5,
+    "policy_risk":   2,
 }
 
-CATEGORY_ORDER = ["ai_products", "ai_research", "ai_business", "ai_tools"]
+# Ordered so the email preserves this layout
+CATEGORY_ORDER = ["model_product", "business", "policy_risk"]
+
+# ══════════════════════════════════════════════════════════════════════
+#  Query set — (query, category, language)
+# ══════════════════════════════════════════════════════════════════════
+
+AI_NEWS_QUERIES: list[tuple[str, str, str]] = [
+    # ── 模型 / 产品 (Model / Product) ────────────────────────────────
+    ("OpenAI new model release", "model_product", "en"),
+    ("Anthropic Claude new release", "model_product", "en"),
+    ("Google Gemini new model launch", "model_product", "en"),
+    ("Meta Llama new release", "model_product", "en"),
+    ("Mistral DeepSeek Qwen new model", "model_product", "en"),
+    ("GPT new feature", "model_product", "en"),
+    ("open source LLM release", "model_product", "en"),
+    ("大模型 发布 新版", "model_product", "zh"),
+    ("OpenAI Anthropic 新品", "model_product", "zh"),
+    ("通义千问 DeepSeek 发布", "model_product", "zh"),
+
+    # ── 商业应用 (Business Applications) ─────────────────────────────
+    ("enterprise AI adoption", "business", "en"),
+    ("OpenAI Anthropic revenue earnings", "business", "en"),
+    ("AI startup funding round", "business", "en"),
+    ("AI deal acquisition", "business", "en"),
+    ("AI market share growth", "business", "en"),
+    ("企业 AI 落地 应用", "business", "zh"),
+    ("AI 融资 估值", "business", "zh"),
+    ("AI 商业化 营收", "business", "zh"),
+
+    # ── 政策 / 风险 (Policy / Risk) ──────────────────────────────────
+    ("AI regulation new law", "policy_risk", "en"),
+    ("EU AI Act enforcement", "policy_risk", "en"),
+    ("AI copyright lawsuit", "policy_risk", "en"),
+    ("AI safety incident", "policy_risk", "en"),
+    ("AI chip export control", "policy_risk", "en"),
+    ("AI 监管 法规", "policy_risk", "zh"),
+    ("AI 安全 风险", "policy_risk", "zh"),
+    ("AI 侵权 诉讼", "policy_risk", "zh"),
+]
+
+# ══════════════════════════════════════════════════════════════════════
+#  Source authority ranking (for dedup tie-breaking)
+# ══════════════════════════════════════════════════════════════════════
+
+def source_authority(source: str) -> int:
+    """
+    Return 50..100 based on how authoritative the source is.
+    Higher = more preferred when deduplicating the same story.
+    Uses substring match on the RSS <source> name (which is a display string
+    like "Reuters" or "South China Morning Post").
+    """
+    s = (source or "").lower()
+    # Tier 1 — official AI-lab / company blogs
+    t1 = ["openai", "anthropic", "deepmind", "meta ai", "microsoft research",
+          "hugging face", "huggingface", "arxiv", "google research"]
+    # Tier 2 — top-tier business/news press
+    t2 = ["reuters", "bloomberg", "wall street journal", "wsj",
+          "financial times", "new york times", "economist"]
+    # Tier 3 — major tech/business press
+    t3 = ["techcrunch", "the verge", "wired", "ars technica", "ars-technica",
+          "mit technology review", "technology review", "the information",
+          "cnbc", "south china morning post", "semianalysis"]
+    # Tier 4 — secondary tech press
+    t4 = ["venturebeat", "forbes", "business insider", "axios",
+          "fortune", "engadget", "mashable"]
+    # ZH trusted publishers
+    t_zh = ["36氪", "36kr", "界面", "jiemian", "虎嗅", "huxiu",
+            "澎湃新闻", "thepaper", "财新", "caixin", "新华社", "xinhua"]
+
+    if any(k in s for k in t1):   return 100
+    if any(k in s for k in t2):   return 90
+    if any(k in s for k in t3):   return 80
+    if any(k in s for k in t_zh): return 75
+    if any(k in s for k in t4):   return 70
+    return 50  # unknown / default
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  Helpers
+# ══════════════════════════════════════════════════════════════════════
+
+_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"\s+")
+_SUFFIX_RE = re.compile(r"\s*[-–—|:·]\s*[^-–—|:·]+$")  # strip trailing " - Source"
+
+
+def _strip_html(raw: str) -> str:
+    """Remove HTML tags from an RSS description and collapse whitespace."""
+    if not raw:
+        return ""
+    text = _TAG_RE.sub(" ", raw)
+    text = html.unescape(text)
+    text = _WS_RE.sub(" ", text).strip()
+    return text[:400]
+
+
+def _normalize_title(title: str) -> str:
+    """Normalize a title for fuzzy dedup: lowercase, drop trailing source, strip punct."""
+    t = (title or "").lower()
+    # Strip common trailing " - Source" separator
+    t = _SUFFIX_RE.sub("", t)
+    # Collapse punctuation/whitespace to single spaces
+    t = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", " ", t, flags=re.UNICODE)
+    return t.strip()
 
 
 def _rss_url(query: str, lang: str) -> str:
-    """Build a Google News RSS URL for the given query + language."""
     q = quote(query)
     if lang == "zh":
         return f"https://news.google.com/rss/search?q={q}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
     return f"https://news.google.com/rss/search?q={q}&hl=en-US&gl=US&ceid=US:en"
 
 
-_TAG_RE = re.compile(r"<[^>]+>")
-_WS_RE = re.compile(r"\s+")
+# ══════════════════════════════════════════════════════════════════════
+#  Step 1 — broad fetch
+# ══════════════════════════════════════════════════════════════════════
 
+@dataclass
+class NewsItem:
+    title: str
+    link: str
+    source: str
+    published_at: str       # ISO string
+    tag: str                # category key
+    lang: str               # "en" | "zh"
+    description: str        # cleaned RSS description
 
-def _strip_html(raw: str) -> str:
-    """Remove HTML tags from an RSS description and collapse whitespace.
-
-    Robust against HTML entities (&nbsp;, &amp; etc.) and malformed markup,
-    which is why we use regex + html.unescape rather than an XML parser.
-    """
-    if not raw:
-        return ""
-    # 1. Strip all tags (non-greedy, anything between < and >)
-    text = _TAG_RE.sub(" ", raw)
-    # 2. Decode HTML entities (&nbsp; &amp; &lt; &#39; ...)
-    text = html.unescape(text)
-    # 3. Collapse runs of whitespace
-    text = _WS_RE.sub(" ", text).strip()
-    return text[:300]
-
-
-def fetch_ai_news(hours: int = 24) -> dict:
-    """
-    Fetch AI news from Google News RSS grouped by the 4 AI categories.
-
-    Only returns items published within the last `hours` (default 24).
-
-    Returns:
-        {
-          "generated_at": ISO string,
-          "window_hours": int,
-          "total": int,
-          "by_category": {
-              "ai_products": [ {title, link, source, publishedAt, tag, description, lang}, ... ],
-              "ai_research": [ ... ],
-              "ai_business": [ ... ],
-              "ai_tools":    [ ... ],
-          }
+    def to_dict(self) -> dict:
+        return {
+            "title":       self.title,
+            "link":        self.link,
+            "source":      self.source,
+            "publishedAt": self.published_at,
+            "tag":         self.tag,
+            "lang":        self.lang,
+            "description": self.description,
         }
+
+
+def fetch_ai_news_raw(hours: int = 24) -> list[NewsItem]:
+    """
+    Fetch AI news from Google News RSS across all (query, category, lang) combos,
+    filter to items published within the last `hours`, return as a flat list.
+    Per-query link dedup is applied. Global cross-category dedup is done later.
     """
     import requests
 
     now_utc = datetime.now(timezone.utc)
     cutoff = now_utc - timedelta(hours=hours)
 
-    by_category: dict[str, list[dict]] = {c: [] for c in CATEGORY_ORDER}
+    items: list[NewsItem] = []
     seen_links: set[str] = set()
-    seen_titles: set[str] = set()
 
     for query, category, lang in AI_NEWS_QUERIES:
         try:
             url = _rss_url(query, lang)
-            response = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0 (CFO-Control-Tower)"})
+            response = requests.get(
+                url, timeout=20,
+                headers={"User-Agent": "Mozilla/5.0 (CFO-Control-Tower)"},
+            )
             response.raise_for_status()
 
             root = ET.fromstring(response.content)
@@ -139,7 +212,7 @@ def fetch_ai_news(hours: int = 24) -> dict:
 
             per_query = 0
             for item in channel.findall("item"):
-                if per_query >= 8:
+                if per_query >= 10:
                     break
                 title_el = item.find("title")
                 link_el = item.find("link")
@@ -149,16 +222,9 @@ def fetch_ai_news(hours: int = 24) -> dict:
 
                 if title_el is None or link_el is None:
                     continue
-
                 link = (link_el.text or "").strip()
                 title = (title_el.text or "").strip()
-                if not link or not title:
-                    continue
-                if link in seen_links:
-                    continue
-                # Dedup near-identical titles across zh/en queries
-                title_key = title.lower()[:120]
-                if title_key in seen_titles:
+                if not link or not title or link in seen_links:
                     continue
 
                 try:
@@ -167,38 +233,141 @@ def fetch_ai_news(hours: int = 24) -> dict:
                         pub_dt = pub_dt.replace(tzinfo=timezone.utc)
                 except Exception:
                     pub_dt = now_utc
-
                 if pub_dt < cutoff:
                     continue
 
                 seen_links.add(link)
-                seen_titles.add(title_key)
-
-                by_category[category].append({
-                    "title": title,
-                    "link": link,
-                    "source": (source_el.text or "").strip() if source_el is not None else "Google News",
-                    "publishedAt": pub_dt.isoformat(),
-                    "tag": category,
-                    "description": _strip_html(desc_el.text or "" if desc_el is not None else ""),
-                    "lang": lang,
-                })
+                items.append(NewsItem(
+                    title=title,
+                    link=link,
+                    source=(source_el.text or "").strip() if source_el is not None else "Google News",
+                    published_at=pub_dt.isoformat(),
+                    tag=category,
+                    lang=lang,
+                    description=_strip_html(desc_el.text if desc_el is not None else ""),
+                ))
                 per_query += 1
-
         except Exception as e:
             logger.warning(f"AI news fetch failed for query '{query}' ({lang}): {e}")
             continue
 
-    # Sort each category by date desc
-    for items in by_category.values():
-        items.sort(key=lambda x: x["publishedAt"], reverse=True)
+    logger.info(f"AI news raw fetch: {len(items)} items across {len(AI_NEWS_QUERIES)} queries")
+    return items
 
+
+# ══════════════════════════════════════════════════════════════════════
+#  Step 2 — global cross-category dedup
+# ══════════════════════════════════════════════════════════════════════
+
+_DEDUP_RATIO = 0.70   # SequenceMatcher threshold (0..1). Higher = stricter.
+
+
+def dedup_and_rank(items: list[NewsItem]) -> list[NewsItem]:
+    """
+    Group near-identical items by normalized-title similarity, then keep the
+    single best representative of each group. "Best" = (authority desc, date desc).
+
+    Complexity is O(N²) but N is typically <120, so ~7k comparisons — fine.
+    Category of the kept item wins the group.
+    """
+    groups: list[list[NewsItem]] = []
+    normalized_cache: dict[int, str] = {}
+
+    def norm(it: NewsItem) -> str:
+        key = id(it)
+        if key not in normalized_cache:
+            normalized_cache[key] = _normalize_title(it.title)
+        return normalized_cache[key]
+
+    for it in items:
+        n = norm(it)
+        placed = False
+        for group in groups:
+            rep = norm(group[0])
+            if not n or not rep:
+                continue
+            if SequenceMatcher(None, n, rep).ratio() >= _DEDUP_RATIO:
+                group.append(it)
+                placed = True
+                break
+        if not placed:
+            groups.append([it])
+
+    result: list[NewsItem] = []
+    for group in groups:
+        best = max(group, key=lambda x: (source_authority(x.source), x.published_at))
+        result.append(best)
+
+    # Sort result globally (latest first) so downstream selection is stable
+    result.sort(key=lambda x: x.published_at, reverse=True)
+    logger.info(f"Dedup: {len(items)} raw -> {len(result)} unique groups")
+    return result
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  Step 3 — top-N per category
+# ══════════════════════════════════════════════════════════════════════
+
+def select_top_per_category(
+    items: list[NewsItem],
+    targets: dict[str, int] | None = None,
+) -> dict[str, list[NewsItem]]:
+    """
+    Bucket items by `tag`, sort within bucket by (authority desc, date desc),
+    take top N per the `targets` map. Empty categories stay empty — no padding.
+    """
+    if targets is None:
+        targets = CATEGORY_TARGETS
+
+    by_cat: dict[str, list[NewsItem]] = defaultdict(list)
+    for it in items:
+        by_cat[it.tag].append(it)
+
+    selected: dict[str, list[NewsItem]] = {}
+    for cat, target in targets.items():
+        bucket = by_cat.get(cat, [])
+        bucket.sort(key=lambda x: (source_authority(x.source), x.published_at), reverse=True)
+        selected[cat] = bucket[:target]
+        logger.info(f"Category {cat}: {len(bucket)} candidates -> {len(selected[cat])} selected (target={target})")
+    return selected
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  Orchestration helper (used by /api/jobs/ai-news-digest)
+# ══════════════════════════════════════════════════════════════════════
+
+def fetch_and_select(hours: int = 24) -> dict:
+    """
+    Full pipeline up to (but not including) summarization.
+    Returns the structure expected by ai_summarizer.summarize_batch() and the
+    email template:
+
+        {
+          "generated_at": ISO,
+          "window_hours": int,
+          "total": int,                 # selected count
+          "raw_total": int,             # pre-dedup count (for debugging)
+          "unique_total": int,          # post-dedup count (for debugging)
+          "by_category": {
+              "model_product": [NewsItem dicts],
+              "business":      [NewsItem dicts],
+              "policy_risk":   [NewsItem dicts],
+          }
+        }
+    """
+    raw = fetch_ai_news_raw(hours=hours)
+    unique = dedup_and_rank(raw)
+    selected = select_top_per_category(unique)
+
+    # Convert to dicts so downstream stages (summarizer, email) can mutate freely
+    by_category = {cat: [it.to_dict() for it in items] for cat, items in selected.items()}
     total = sum(len(v) for v in by_category.values())
-    logger.info(f"AI news: fetched {total} items across {len(CATEGORY_ORDER)} categories (window={hours}h)")
 
     return {
         "generated_at": datetime.now(TZ_SHANGHAI).isoformat(),
         "window_hours": hours,
         "total": total,
+        "raw_total": len(raw),
+        "unique_total": len(unique),
         "by_category": by_category,
     }
