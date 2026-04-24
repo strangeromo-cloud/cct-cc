@@ -35,15 +35,24 @@ TZ_SHANGHAI = timezone(timedelta(hours=8))
 #  Categories
 # ══════════════════════════════════════════════════════════════════════
 
-# (category_key, target_count)
-CATEGORY_TARGETS: dict[str, int] = {
-    "model_product": 5,
-    "business":      5,
-    "policy_risk":   2,
+# (min_count, max_count) — we pick at least `min` from each category if
+# available, then top up towards TOTAL_TARGET along PRIORITY_ORDER.
+CATEGORY_RANGES: dict[str, tuple[int, int]] = {
+    "model_product": (2, 3),
+    "business":      (2, 3),
+    "policy_risk":   (1, 2),
 }
 
-# Ordered so the email preserves this layout
+# Total number of items in the final digest (across all categories).
+TOTAL_TARGET = 6
+
+# When filling extra slots, prefer these categories in this order. Also the
+# display order of sections in the email.
 CATEGORY_ORDER = ["model_product", "business", "policy_risk"]
+PRIORITY_ORDER = CATEGORY_ORDER  # alias for clarity at call sites
+
+# Back-compat: some older callers / debug endpoints may still read this.
+CATEGORY_TARGETS: dict[str, int] = {k: v[1] for k, v in CATEGORY_RANGES.items()}
 
 # ══════════════════════════════════════════════════════════════════════
 #  Query set — (query, category, language)
@@ -364,25 +373,78 @@ def dedup_and_rank(items: list[NewsItem]) -> list[NewsItem]:
 
 def select_top_per_category(
     items: list[NewsItem],
-    targets: dict[str, int] | None = None,
+    ranges: dict[str, tuple[int, int]] | None = None,
+    total_target: int = TOTAL_TARGET,
 ) -> dict[str, list[NewsItem]]:
     """
-    Bucket items by `tag`, sort within bucket by (authority desc, date desc),
-    take top N per the `targets` map. Empty categories stay empty — no padding.
+    Bucket items by `tag`, sort each bucket by (authority desc, date desc),
+    then:
+
+      1. Take at least the MIN from each category (clipped to availability).
+      2. Fill up toward `total_target` by walking PRIORITY_ORDER and taking
+         the next-best item from categories that are still under their MAX.
+      3. If step 2 can't reach `total_target` (one category is thin), go
+         BEYOND each category's MAX in priority order until we hit the
+         target or run out of candidates.
+
+    Result is at most `total_target` items total, with per-category counts
+    within each (min, max) range whenever possible — but gracefully
+    degrades when a category has few or no candidates.
     """
-    if targets is None:
-        targets = CATEGORY_TARGETS
+    if ranges is None:
+        ranges = CATEGORY_RANGES
 
     by_cat: dict[str, list[NewsItem]] = defaultdict(list)
     for it in items:
         by_cat[it.tag].append(it)
 
+    # Sort each bucket once; we'll index into it by position afterwards.
+    for cat in by_cat:
+        by_cat[cat].sort(
+            key=lambda x: (source_authority(x.source), x.published_at),
+            reverse=True,
+        )
+
+    # Step 1 — start with MIN per category (clipped to availability).
     selected: dict[str, list[NewsItem]] = {}
-    for cat, target in targets.items():
+    for cat in CATEGORY_ORDER:
+        min_n, _ = ranges.get(cat, (0, 0))
         bucket = by_cat.get(cat, [])
-        bucket.sort(key=lambda x: (source_authority(x.source), x.published_at), reverse=True)
-        selected[cat] = bucket[:target]
-        logger.info(f"Category {cat}: {len(bucket)} candidates -> {len(selected[cat])} selected (target={target})")
+        selected[cat] = bucket[:min_n]
+
+    total = sum(len(v) for v in selected.values())
+
+    def _try_add(respect_max: bool) -> bool:
+        """Add one more item from the highest-priority eligible category.
+        Returns True if added, False if no category is eligible."""
+        for cat in PRIORITY_ORDER:
+            current = len(selected[cat])
+            bucket = by_cat.get(cat, [])
+            if current >= len(bucket):
+                continue
+            if respect_max:
+                _, max_n = ranges.get(cat, (0, 0))
+                if current >= max_n:
+                    continue
+            selected[cat].append(bucket[current])
+            return True
+        return False
+
+    # Step 2 — fill toward TOTAL_TARGET while respecting per-category MAX.
+    while total < total_target and _try_add(respect_max=True):
+        total += 1
+
+    # Step 3 — if still under target, go beyond per-category MAX.
+    while total < total_target and _try_add(respect_max=False):
+        total += 1
+
+    for cat in CATEGORY_ORDER:
+        available = len(by_cat.get(cat, []))
+        min_n, max_n = ranges.get(cat, (0, 0))
+        logger.info(
+            f"Category {cat}: {available} candidates -> "
+            f"{len(selected[cat])} selected (range={min_n}-{max_n})"
+        )
     return selected
 
 
