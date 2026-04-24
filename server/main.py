@@ -289,6 +289,29 @@ async def api_jobs_ai_news_digest(
     }
 
 
+@app.get("/api/jobs/debug/fetch")
+async def api_jobs_debug_fetch(
+    url: str = Query(..., description="URL to fetch (not resolved)"),
+    authorization: str | None = Header(default=None),
+):
+    """Fetch a URL and return status + first 4k chars of HTML. Bypasses extraction."""
+    _require_job_token(authorization)
+    import requests as _requests
+    from ai_summarizer import BROWSER_HEADERS
+    try:
+        r = _requests.get(url, allow_redirects=True, timeout=30, headers=BROWSER_HEADERS)
+        return {
+            "url": url,
+            "final_url": r.url,
+            "http_status": r.status_code,
+            "headers": dict(r.headers),
+            "html_size": len(r.text),
+            "html_preview": r.text[:4000],
+        }
+    except Exception as e:
+        return {"url": url, "error": f"{type(e).__name__}: {e}"}
+
+
 @app.get("/api/jobs/debug/summarize")
 async def api_jobs_debug_summarize(
     url: str = Query(..., description="Google News RSS URL or direct article URL"),
