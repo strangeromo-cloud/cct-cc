@@ -138,6 +138,19 @@ def _extract_meta_fallback(html_content: str, diag: dict | None = None) -> str |
             diag["meta_fallback_error"] = f"lxml.fromstring raised: {type(e).__name__}: {e}"
         return None
 
+    # Structural counters — helps distinguish "site has no metadata" from
+    # "our xpath doesn't match the site's convention".
+    if diag is not None:
+        diag["total_meta_tags"] = len(tree.xpath("//meta"))
+        diag["total_script_ldjson"] = len(tree.xpath("//script[@type='application/ld+json']"))
+        diag["total_article_tags"] = len(tree.xpath("//article"))
+        diag["total_p_tags"] = len(tree.xpath("//p"))
+        # Sample the first few meta tags' attribute dicts so we can see the
+        # site's preferred naming convention at a glance.
+        diag["sample_metas"] = [
+            dict(m.attrib) for m in tree.xpath("//meta")[:8]
+        ]
+
     snippets: list[str] = []
     seen_prefixes: set[str] = set()
 
