@@ -38,21 +38,44 @@ UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_0) AppleWebKit/537.36 (KHTML, li
 
 def resolve_article_url(google_news_url: str) -> str | None:
     """
-    Google News RSS links like https://news.google.com/rss/articles/CBMi...?oc=5
-    redirect (via an HTML page + JS or a 302) to the actual publisher URL.
-    Do a HEAD with redirects to resolve.
+    Resolve a Google News RSS/article URL to the real publisher URL.
+
+    Google News now uses an encrypted redirect — HTTP HEAD/GET with
+    allow_redirects does NOT resolve, because the final hop happens in
+    JavaScript. We use `googlenewsdecoder`, which calls Google's internal
+    decoder endpoint, to turn CBMi-prefixed URLs into the actual URL.
+
+    Falls back to a plain GET-with-redirects for any non-Google-News URL.
     """
-    try:
-        r = requests.head(google_news_url, allow_redirects=True, timeout=FETCH_TIMEOUT,
-                          headers={"User-Agent": UA})
-        final = r.url
-        # Some Google News links resolve to another google.com intermediate page.
-        # Best-effort: if still on google.com, just return the original and let
-        # trafilatura try with the GET redirect chain.
-        return final
-    except Exception as e:
-        logger.debug(f"resolve_article_url failed for {google_news_url[:80]}: {e}")
+    if not google_news_url:
         return None
+
+    # Primary path — encrypted Google News URLs
+    if "news.google.com" in google_news_url:
+        try:
+            from googlenewsdecoder import gnewsdecoder
+            result = gnewsdecoder(google_news_url, interval=1)
+            if isinstance(result, dict) and result.get("status") and result.get("decoded_url"):
+                return result["decoded_url"]
+            logger.debug(f"googlenewsdecoder returned no URL: {result}")
+        except ImportError:
+            logger.warning("googlenewsdecoder not installed — Google News URL resolution disabled")
+        except Exception as e:
+            logger.debug(f"googlenewsdecoder failed for {google_news_url[:80]}: {e}")
+
+    # Fallback — plain HTTP redirect chain (works for direct publisher URLs)
+    try:
+        r = requests.get(google_news_url, allow_redirects=True, timeout=FETCH_TIMEOUT,
+                         headers={"User-Agent": UA}, stream=True)
+        # Close body — we only want the final URL from the redirect chain
+        r.close()
+        final = r.url
+        if final and "news.google.com" not in final:
+            return final
+    except Exception as e:
+        logger.debug(f"GET fallback failed for {google_news_url[:80]}: {e}")
+
+    return None
 
 
 def fetch_article_text(url: str) -> str | None:
@@ -60,6 +83,12 @@ def fetch_article_text(url: str) -> str | None:
     Download the article and extract the main text via trafilatura.
     Returns None on failure (network / paywall / extraction blank).
     """
+    if not url or "news.google.com" in url:
+        # URL wasn't resolved to a real publisher — trafilatura would just
+        # scrape the Google News wrapper page (title + source) which is
+        # useless for summarization.
+        return None
+
     try:
         import trafilatura
     except ImportError:
@@ -91,8 +120,9 @@ def fetch_article_text(url: str) -> str | None:
     if not text:
         return None
     text = text.strip()
-    if len(text) < 80:
-        # Probably a paywall stub or navigation-only — useless for summarizing.
+    if len(text) < 200:
+        # Likely a paywall stub, navigation, or cookie-consent page.
+        # Real news articles are almost always >200 chars of body text.
         return None
     return text[:MAX_ARTICLE_CHARS]
 
@@ -177,11 +207,26 @@ def summarize_article(title: str, text: str, source: str, lang: str) -> str | No
 #  Batch orchestration
 # ══════════════════════════════════════════════════════════════════════
 
+def _is_trivial_description(desc: str, title: str, source: str) -> bool:
+    """
+    Google News RSS often fills <description> with just "<Title> <Source>" —
+    there's no real content there to summarize. Detect that so we don't feed
+    garbage to the LLM.
+    """
+    if not desc:
+        return True
+    # Strip source + title and see if anything's left
+    residual = desc.replace(title, "").replace(source, "")
+    residual = "".join(c for c in residual if c.isalnum())
+    return len(residual) < 30
+
+
 def _process_one(item: dict) -> dict:
     """
     Fetch + summarize a single item. Mutates `item` in place with:
-      - summary:     str  — final text for the email
+      - summary:     str  — final text for the email (may be empty)
       - summary_src: str  — "llm" | "rss" | "none"
+      - resolved_url: str — real publisher URL (or the input link on failure)
     """
     title = item.get("title", "")
     link = item.get("link", "")
@@ -189,31 +234,34 @@ def _process_one(item: dict) -> dict:
     lang = item.get("lang", "en")
     rss_desc = item.get("description", "")
 
-    # Step 1 + 2: resolve + fetch + extract
-    final_url = resolve_article_url(link) or link
-    article_text = fetch_article_text(final_url)
+    # Step 1 + 2: resolve Google News redirect → fetch HTML → extract body text
+    final_url = resolve_article_url(link)
+    effective_url = final_url or link
+    article_text = fetch_article_text(final_url) if final_url else None
 
-    # Step 3: LLM summary
+    # Step 3: produce a summary. Order of preference:
+    #   (a) LLM over the full article body
+    #   (b) LLM over the RSS description (only if it has real content, not
+    #       just "Title Source" filler from Google News)
+    #   (c) meaningful RSS description verbatim
+    #   (d) nothing (the email will simply omit the summary line)
     summary: str | None = None
+    src = "none"
     if article_text:
         summary = summarize_article(title, article_text, source, lang)
-    elif rss_desc and len(rss_desc) >= 100:
-        # No full article — try summarizing the RSS description itself; it's
-        # often already 1-2 sentences so this just cleans it up.
+        if summary:
+            src = "llm"
+    if not summary and not _is_trivial_description(rss_desc, title, source):
         summary = summarize_article(title, rss_desc, source, lang)
+        if summary:
+            src = "llm"
+        else:
+            summary = rss_desc
+            src = "rss"
 
-    if summary:
-        item["summary"] = summary
-        item["summary_src"] = "llm"
-    elif rss_desc:
-        item["summary"] = rss_desc
-        item["summary_src"] = "rss"
-    else:
-        item["summary"] = ""
-        item["summary_src"] = "none"
-
-    # Expose resolved URL for the email (so "阅读原文" bypasses Google News proxy)
-    item["resolved_url"] = final_url
+    item["summary"] = summary or ""
+    item["summary_src"] = src
+    item["resolved_url"] = effective_url
     return item
 
 

@@ -128,6 +128,39 @@ _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s+")
 _SUFFIX_RE = re.compile(r"\s*[-–—|:·]\s*[^-–—|:·]+$")  # strip trailing " - Source"
 
+# Match distinctive model / product names. When two titles share one of these,
+# they're almost always the same story (within a 24h window).
+# Each match group normalizes to "<family>-<version>", e.g. "gpt-5.5".
+_MODEL_ENTITY_RE = re.compile(
+    r"""
+    \b(
+        # Latin-script model families
+        (?:gpt|claude|gemini|llama|qwen|mistral|grok|phi|gemma|kimi|yi|hunyuan|doubao|ernie|spark|pangu|glm)
+        [\s\-]?
+        (?:\d+(?:\.\d+)?[a-z]?)            # version like 5.5 / 4o / 3.5-turbo
+    )
+    |
+    \b(
+        # Product-only names that carry enough identity on their own
+        (?:deepseek|chatgpt|sora|dall[\s\-]?e|midjourney|copilot|cursor|bard|perplexity)
+        [\s\-]?(?:v\d+|r\d+|pro|plus|max)?
+    )
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def _extract_model_entities(title: str) -> set[str]:
+    """Extract canonical model/product tokens from a title (for cross-article dedup)."""
+    entities: set[str] = set()
+    for m in _MODEL_ENTITY_RE.finditer(title or ""):
+        token = (m.group(1) or m.group(2) or "").lower()
+        # Canonicalize: remove whitespace and dashes so "gpt 5" == "gpt-5" == "gpt5"
+        canon = re.sub(r"[\s\-]+", "", token)
+        if canon:
+            entities.add(canon)
+    return entities
+
 
 def _strip_html(raw: str) -> str:
     """Remove HTML tags from an RSS description and collapse whitespace."""
@@ -259,16 +292,39 @@ def fetch_ai_news_raw(hours: int = 24) -> list[NewsItem]:
 #  Step 2 — global cross-category dedup
 # ══════════════════════════════════════════════════════════════════════
 
-_DEDUP_RATIO = 0.70   # SequenceMatcher threshold (0..1). Higher = stricter.
+_DEDUP_RATIO = 0.65    # SequenceMatcher threshold for pure title similarity
+
+
+def _same_story(a: NewsItem, b: NewsItem, a_norm: str, b_norm: str) -> bool:
+    """
+    Decide whether two items describe the same story. Two signals, either
+    sufficient:
+      (1) High title similarity (>= _DEDUP_RATIO).
+      (2) Shared distinctive model/product entity (e.g. both mention
+          "gpt-5.5"). Within a 24h window, near-duplicate coverage of the
+          same launch is the overwhelming case; tolerating rare over-merges
+          (e.g. a comparison article) is a good tradeoff for killing the
+          "4 headlines about GPT-5.5" problem.
+    """
+    if not a_norm or not b_norm:
+        return False
+    if SequenceMatcher(None, a_norm, b_norm).ratio() >= _DEDUP_RATIO:
+        return True
+    ent_a = _extract_model_entities(a.title)
+    if ent_a and ent_a & _extract_model_entities(b.title):
+        return True
+    return False
 
 
 def dedup_and_rank(items: list[NewsItem]) -> list[NewsItem]:
     """
-    Group near-identical items by normalized-title similarity, then keep the
-    single best representative of each group. "Best" = (authority desc, date desc).
+    Group near-identical items, then keep the single best representative per
+    group ("best" = highest source authority, then latest).
+
+    Grouping rule (see _same_story): fuzzy title match OR shared model/product
+    entity (GPT-5.5, Claude 4, Gemini 2, ...).
 
     Complexity is O(N²) but N is typically <120, so ~7k comparisons — fine.
-    Category of the kept item wins the group.
     """
     groups: list[list[NewsItem]] = []
     normalized_cache: dict[int, str] = {}
@@ -283,10 +339,8 @@ def dedup_and_rank(items: list[NewsItem]) -> list[NewsItem]:
         n = norm(it)
         placed = False
         for group in groups:
-            rep = norm(group[0])
-            if not n or not rep:
-                continue
-            if SequenceMatcher(None, n, rep).ratio() >= _DEDUP_RATIO:
+            rep = group[0]
+            if _same_story(it, rep, n, norm(rep)):
                 group.append(it)
                 placed = True
                 break
