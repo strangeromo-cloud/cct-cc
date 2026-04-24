@@ -31,6 +31,17 @@ MAX_ARTICLE_CHARS = 8000  # truncate article text before sending to LLM
 
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
 
+# Browser-like headers. Some sites (Cloudflare, bot detection) reject requests
+# that only send a User-Agent without Accept / Accept-Language.
+BROWSER_HEADERS = {
+    "User-Agent": UA,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+}
+
 
 # ══════════════════════════════════════════════════════════════════════
 #  Article fetch
@@ -78,53 +89,72 @@ def resolve_article_url(google_news_url: str) -> str | None:
     return None
 
 
-def fetch_article_text(url: str) -> str | None:
+def fetch_article_text(url: str, debug: bool = False) -> str | dict | None:
     """
     Download the article and extract the main text via trafilatura.
-    Returns None on failure (network / paywall / extraction blank).
+
+    Returns the extracted text (str), or None on failure.
+    If `debug=True`, returns a dict with per-step diagnostics instead of
+    None/str — used by the /api/jobs/debug/summarize endpoint.
     """
+    diag: dict = {"url": url}
+
     if not url or "news.google.com" in url:
-        # URL wasn't resolved to a real publisher — trafilatura would just
-        # scrape the Google News wrapper page (title + source) which is
-        # useless for summarization.
-        return None
+        diag["skipped"] = "google news URL (not resolved)"
+        return diag if debug else None
 
     try:
         import trafilatura
     except ImportError:
-        logger.warning("trafilatura not installed — article extraction disabled")
-        return None
+        diag["error"] = "trafilatura not installed"
+        logger.warning(diag["error"])
+        return diag if debug else None
 
+    # Step 1: download
     try:
         r = requests.get(url, allow_redirects=True, timeout=FETCH_TIMEOUT,
-                         headers={"User-Agent": UA})
+                         headers=BROWSER_HEADERS)
+        diag["http_status"] = r.status_code
+        diag["final_url"] = r.url
+        diag["html_size"] = len(r.text)
         r.raise_for_status()
         html_content = r.text
     except Exception as e:
-        logger.debug(f"fetch_article_text GET failed for {url[:80]}: {e}")
-        return None
+        diag["error"] = f"GET failed: {type(e).__name__}: {e}"
+        logger.info(f"fetch_article_text GET failed for {url[:80]}: {e}")
+        return diag if debug else None
 
+    # Step 2: extract main article body. favor_recall is more lenient for news
+    # sites that wrap the body in unusual DOM structures.
     try:
         text = trafilatura.extract(
             html_content,
             url=url,
-            favor_precision=False,
+            favor_recall=True,
             include_comments=False,
             include_tables=False,
             deduplicate=True,
         )
     except Exception as e:
-        logger.debug(f"trafilatura.extract raised for {url[:80]}: {e}")
-        return None
+        diag["error"] = f"trafilatura.extract raised: {type(e).__name__}: {e}"
+        logger.info(diag["error"])
+        return diag if debug else None
 
     if not text:
-        return None
+        diag["error"] = "trafilatura returned None"
+        return diag if debug else None
+
     text = text.strip()
+    diag["extracted_chars"] = len(text)
+    diag["extracted_preview"] = text[:200]
+
     if len(text) < 200:
-        # Likely a paywall stub, navigation, or cookie-consent page.
-        # Real news articles are almost always >200 chars of body text.
-        return None
-    return text[:MAX_ARTICLE_CHARS]
+        diag["error"] = f"extraction too short ({len(text)} chars)"
+        return diag if debug else None
+
+    truncated = text[:MAX_ARTICLE_CHARS]
+    diag["ok"] = True
+    return diag if debug else truncated
 
 
 # ══════════════════════════════════════════════════════════════════════

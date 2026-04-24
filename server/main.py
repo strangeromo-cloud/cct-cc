@@ -29,7 +29,7 @@ from global_data import (
 )
 from global_summary import stream_global_summary
 from ai_news import fetch_and_select
-from ai_summarizer import summarize_batch
+from ai_summarizer import summarize_batch, resolve_article_url, fetch_article_text, summarize_article
 from email_sender import send_digest
 from pydantic import BaseModel
 
@@ -287,6 +287,52 @@ async def api_jobs_ai_news_digest(
         "email": result,
         "counts_by_category": {k: len(v) for k, v in digest.get("by_category", {}).items()},
     }
+
+
+@app.get("/api/jobs/debug/summarize")
+async def api_jobs_debug_summarize(
+    url: str = Query(..., description="Google News RSS URL or direct article URL"),
+    authorization: str | None = Header(default=None),
+    lang: str = Query("en", description="Article language (en|zh) for LLM prompt"),
+    call_llm: bool = Query(False, description="Actually call the LLM (costs tokens)"),
+):
+    """
+    Per-URL diagnostic for the digest summarization pipeline.
+
+    Runs resolve_article_url → fetch_article_text (with per-step diagnostics)
+    → optionally summarize_article, and returns the full trace so we can
+    debug why a given article is falling back to RSS.
+    """
+    _require_job_token(authorization)
+
+    trace: dict = {"input_url": url}
+
+    # Step 1: resolve Google News
+    resolved = resolve_article_url(url)
+    trace["resolved_url"] = resolved
+    trace["resolved_is_google"] = bool(resolved and "news.google.com" in resolved)
+
+    if not resolved or "news.google.com" in resolved:
+        trace["status"] = "resolve_failed"
+        return trace
+
+    # Step 2: fetch + extract (with debug diagnostics)
+    fetch_result = fetch_article_text(resolved, debug=True)
+    trace["fetch"] = fetch_result
+
+    if not isinstance(fetch_result, dict) or not fetch_result.get("ok"):
+        trace["status"] = "extract_failed"
+        return trace
+
+    # Step 3: LLM summary (optional — costs tokens)
+    article_text = (fetch_result.get("extracted_preview") or "")  # just to show
+    # Re-fetch the full text (debug=False returns the truncated string)
+    full_text = fetch_article_text(resolved, debug=False)
+    if call_llm and full_text:
+        summary = summarize_article("(title not provided)", full_text, "unknown", lang)
+        trace["llm_summary"] = summary or "(LLM returned empty)"
+    trace["status"] = "ok"
+    return trace
 
 
 # ── Run ──────────────────────────────────────────────────────────────
