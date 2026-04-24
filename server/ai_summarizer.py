@@ -94,48 +94,21 @@ def resolve_article_url(google_news_url: str) -> str | None:
 
 # ── Meta / JSON-LD fallback ──────────────────────────────────────────
 # Used when trafilatura returns nothing — common for JS-rendered sites
-# (Anthropic, TechCrunch, The Verge etc.). These sites ship a static HTML
-# shell, but meta tags and JSON-LD structured data are still present and
-# usually contain a 150-400 char article description.
-
-# Matches both `property="og:description" ... content="..."` and reversed order.
-def _build_meta_re(key_attr: str, key_val: str) -> list[re.Pattern]:
-    forward = rf'''<meta\s+(?:[^>]*?\s+)?{key_attr}\s*=\s*["']{key_val}["']\s+[^>]*?content\s*=\s*["']([^"']+)["']'''
-    reverse = rf'''<meta\s+(?:[^>]*?\s+)?content\s*=\s*["']([^"']+)["']\s+[^>]*?{key_attr}\s*=\s*["']{key_val}["']'''
-    return [re.compile(forward, re.IGNORECASE), re.compile(reverse, re.IGNORECASE)]
-
-
-_META_PATTERNS = (
-    _build_meta_re("property", "og:description")
-    + _build_meta_re("name", "twitter:description")
-    + _build_meta_re("name", "description")
-)
-_JSON_LD_RE = re.compile(
-    r'<script[^>]*type\s*=\s*["\']application/ld\+json["\'][^>]*>(.*?)</script>',
-    re.DOTALL | re.IGNORECASE,
-)
-# Also extract the first few <p> blocks inside <article> as a last resort.
-_ARTICLE_P_RE = re.compile(
-    r'<article[^>]*>(.*?)</article>',
-    re.DOTALL | re.IGNORECASE,
-)
-_P_RE = re.compile(r'<p[^>]*>(.*?)</p>', re.DOTALL | re.IGNORECASE)
-_STRIP_TAGS_RE = re.compile(r'<[^>]+>')
-
-
-def _clean_html_text(text: str) -> str:
-    text = _STRIP_TAGS_RE.sub(" ", text)
-    text = _html_module.unescape(text)
-    return " ".join(text.split())
+# (Anthropic, TechCrunch, The Verge). These sites ship a static HTML shell,
+# but meta tags and JSON-LD structured data are still there and usually
+# contain a 150-500 char article description.
+#
+# Use lxml (already a trafilatura dependency) for robust parsing — regex
+# over HTML misses multi-line / reordered / self-closing meta tags.
 
 
 def _walk_jsonld(obj, collector: list[str]) -> None:
-    """Recursively pull articleBody / description / headline fields out of JSON-LD."""
+    """Recursively pull articleBody / description / headline out of JSON-LD."""
     if isinstance(obj, list):
         for x in obj:
             _walk_jsonld(x, collector)
     elif isinstance(obj, dict):
-        for key in ("articleBody", "description", "headline"):
+        for key in ("articleBody", "description", "headline", "abstract"):
             val = obj.get(key)
             if isinstance(val, str) and len(val) >= 30:
                 collector.append(val.strip())
@@ -144,19 +117,35 @@ def _walk_jsonld(obj, collector: list[str]) -> None:
                 _walk_jsonld(val, collector)
 
 
-def _extract_meta_fallback(html_content: str) -> str | None:
+def _extract_meta_fallback(html_content: str, diag: dict | None = None) -> str | None:
     """
     Stitch together article context from meta tags, JSON-LD, and the first
-    few <article> <p> blocks. Returns a single concatenated string or None
-    if nothing useful could be found.
+    few <article> <p> blocks. Populates `diag` (if given) with per-source
+    character counts for easier debugging.
+    Returns a single concatenated string or None if nothing useful found.
     """
+    try:
+        from lxml import html as lxml_html
+    except ImportError:
+        if diag is not None:
+            diag["meta_fallback_error"] = "lxml not installed"
+        return None
+
+    try:
+        tree = lxml_html.fromstring(html_content)
+    except Exception as e:
+        if diag is not None:
+            diag["meta_fallback_error"] = f"lxml.fromstring raised: {type(e).__name__}: {e}"
+        return None
+
     snippets: list[str] = []
     seen_prefixes: set[str] = set()
 
-    def add(raw: str | None):
+    def add(raw: str | None, tag: str):
         if not raw:
             return
-        text = _clean_html_text(raw)
+        text = _html_module.unescape(raw)
+        text = " ".join(text.split())
         if len(text) < 30:
             return
         prefix = text[:120]
@@ -164,37 +153,71 @@ def _extract_meta_fallback(html_content: str) -> str | None:
             return
         seen_prefixes.add(prefix)
         snippets.append(text)
+        if diag is not None:
+            diag.setdefault("meta_sources", []).append(f"{tag}:{len(text)}")
 
-    # 1. Meta tags (og, twitter, plain description) — both attribute orders
-    for pattern in _META_PATTERNS:
-        m = pattern.search(html_content)
-        if m:
-            add(m.group(1))
+    # 1. Meta tags — check both property= and name= variants
+    meta_selectors = [
+        ("//meta[@property='og:description']/@content",       "og:description"),
+        ("//meta[@name='og:description']/@content",           "og:description (name)"),
+        ("//meta[@property='twitter:description']/@content",  "twitter:description (prop)"),
+        ("//meta[@name='twitter:description']/@content",      "twitter:description"),
+        ("//meta[@name='description']/@content",              "description"),
+        ("//meta[@property='description']/@content",          "description (prop)"),
+        ("//meta[@itemprop='description']/@content",          "itemprop:description"),
+        ("//meta[@property='og:title']/@content",             "og:title"),
+    ]
+    for xpath, tag in meta_selectors:
+        for val in tree.xpath(xpath):
+            add(val, tag)
 
     # 2. JSON-LD structured data
-    for m in _JSON_LD_RE.finditer(html_content):
-        raw = m.group(1).strip()
+    for script in tree.xpath("//script[@type='application/ld+json']"):
+        raw = (script.text_content() or "").strip()
+        if not raw:
+            continue
         try:
             data = json.loads(raw)
         except (json.JSONDecodeError, ValueError):
+            # Some sites embed multiple JSON objects separated by newlines
+            for line in raw.splitlines():
+                try:
+                    data = json.loads(line)
+                except Exception:
+                    continue
+                ld: list[str] = []
+                _walk_jsonld(data, ld)
+                for s in ld:
+                    add(s, "json-ld")
             continue
-        ld_snips: list[str] = []
-        _walk_jsonld(data, ld_snips)
-        for s in ld_snips:
-            add(s)
+        ld: list[str] = []
+        _walk_jsonld(data, ld)
+        for s in ld:
+            add(s, "json-ld")
 
-    # 3. <article>…<p>…</p></article> fallback — grab a couple of body paragraphs
-    for article_match in _ARTICLE_P_RE.finditer(html_content):
-        ps = _P_RE.findall(article_match.group(1))
-        for p in ps[:4]:
-            add(p)
+    # 3. <article> ... <p> — first few paragraphs from the first article element
+    for article in tree.xpath("//article"):
+        ps = article.xpath(".//p")
+        for p in ps[:6]:
+            text = (p.text_content() or "").strip()
+            if len(text) >= 40:
+                add(text, "article<p>")
         if snippets:
             break
 
+    # 4. Last-ditch: <main> paragraphs
+    if not snippets:
+        for main in tree.xpath("//main"):
+            for p in main.xpath(".//p")[:6]:
+                text = (p.text_content() or "").strip()
+                if len(text) >= 40:
+                    add(text, "main<p>")
+            if snippets:
+                break
+
     if not snippets:
         return None
-    combined = "\n\n".join(snippets)
-    return combined[:5000]
+    return "\n\n".join(snippets)[:5000]
 
 
 def fetch_article_text(url: str, debug: bool = False) -> str | dict | None:
@@ -258,7 +281,7 @@ def fetch_article_text(url: str, debug: bool = False) -> str | dict | None:
     meta_text: str | None = None
     if not trafilatura_text or len(trafilatura_text) < 200:
         try:
-            meta_text = _extract_meta_fallback(html_content)
+            meta_text = _extract_meta_fallback(html_content, diag=diag)
         except Exception as e:
             diag["meta_error"] = f"{type(e).__name__}: {e}"
             logger.info(f"meta fallback raised for {url[:80]}: {e}")
