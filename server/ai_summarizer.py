@@ -36,11 +36,16 @@ UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_0) AppleWebKit/537.36 (KHTML, li
 
 # Browser-like headers. Some sites (Cloudflare, bot detection) reject requests
 # that only send a User-Agent without Accept / Accept-Language.
+#
+# We deliberately DO NOT set Accept-Encoding: requests/urllib3 set it to
+# "gzip, deflate" by default and transparently decode those encodings.
+# If we add "br", the server will send Brotli-compressed content but requests
+# won't decode it (unless the `brotli` package is installed), producing
+# unparseable binary that looks like an empty HTML to lxml/trafilatura.
 BROWSER_HEADERS = {
     "User-Agent": UA,
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
-    "Accept-Encoding": "gzip, deflate, br",
     "Connection": "keep-alive",
     "Upgrade-Insecure-Requests": "1",
 }
