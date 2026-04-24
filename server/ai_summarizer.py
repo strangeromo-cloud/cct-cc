@@ -385,12 +385,23 @@ def summarize_article(title: str, text: str, source: str, lang: str) -> str | No
 
     try:
         client = _get_llm_client()
-        resp = client.chat.completions.create(
+        # Newer OpenAI models (gpt-5.x, o-series) require `max_completion_tokens`
+        # instead of the legacy `max_tokens`. Try the new name first and fall
+        # back to the old one if the server rejects it (third-party OpenAI-
+        # compatible providers that haven't caught up yet).
+        kwargs = dict(
             model=LLM_MODEL,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
-            max_tokens=260,
         )
+        try:
+            resp = client.chat.completions.create(max_completion_tokens=260, **kwargs)
+        except Exception as e:
+            # Detect "unsupported parameter: max_completion_tokens" and retry.
+            if "max_completion_tokens" in str(e).lower():
+                resp = client.chat.completions.create(max_tokens=260, **kwargs)
+            else:
+                raise
         choice = resp.choices[0].message.content or ""
         summary = choice.strip()
         if not summary:

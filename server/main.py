@@ -304,12 +304,19 @@ async def api_jobs_debug_llm(authorization: str | None = Header(default=None)):
     try:
         from openai import OpenAI
         client = OpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL, timeout=30)
-        resp = client.chat.completions.create(
+        # Try the modern param name; fall back to the legacy one.
+        kwargs = dict(
             model=LLM_MODEL,
             messages=[{"role": "user", "content": "Reply with exactly: pong"}],
             temperature=0,
-            max_tokens=10,
         )
+        try:
+            resp = client.chat.completions.create(max_completion_tokens=10, **kwargs)
+        except Exception as e:
+            if "max_completion_tokens" in str(e).lower():
+                resp = client.chat.completions.create(max_tokens=10, **kwargs)
+            else:
+                raise
         result["response_content"] = resp.choices[0].message.content
         result["finish_reason"] = resp.choices[0].finish_reason
         result["usage"] = resp.usage.model_dump() if resp.usage else None
