@@ -289,6 +289,38 @@ async def api_jobs_ai_news_digest(
     }
 
 
+@app.get("/api/jobs/debug/llm")
+async def api_jobs_debug_llm(authorization: str | None = Header(default=None)):
+    """Ping the configured LLM with a short prompt and report full error trace."""
+    _require_job_token(authorization)
+    import traceback
+    from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
+    result = {
+        "api_key_set": bool(LLM_API_KEY),
+        "api_key_prefix": (LLM_API_KEY[:8] + "..." + LLM_API_KEY[-4:]) if LLM_API_KEY else None,
+        "base_url": LLM_BASE_URL,
+        "model": LLM_MODEL,
+    }
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL, timeout=30)
+        resp = client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[{"role": "user", "content": "Reply with exactly: pong"}],
+            temperature=0,
+            max_tokens=10,
+        )
+        result["response_content"] = resp.choices[0].message.content
+        result["finish_reason"] = resp.choices[0].finish_reason
+        result["usage"] = resp.usage.model_dump() if resp.usage else None
+        result["ok"] = True
+    except Exception as e:
+        result["ok"] = False
+        result["error"] = f"{type(e).__name__}: {e}"
+        result["traceback"] = traceback.format_exc()
+    return result
+
+
 @app.get("/api/jobs/debug/fetch")
 async def api_jobs_debug_fetch(
     url: str = Query(..., description="URL to fetch (not resolved)"),
