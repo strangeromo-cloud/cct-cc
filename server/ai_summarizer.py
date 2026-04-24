@@ -351,18 +351,24 @@ _PROMPT_ZH = """你是一名资深 AI 行业编辑。请根据下面这则新闻
 # English articles: ask the LLM to produce both a translated Chinese title
 # and a Chinese summary in one shot, returned as JSON so we can parse them
 # separately. This saves a second API round-trip.
+#
+# We also pass response_format={"type": "json_object"} to the API, which
+# forces the model to return a syntactically valid JSON object — no prose,
+# no markdown fences. The prompt itself then only needs to define the schema
+# and the language/style constraints.
 _PROMPT_EN_TO_ZH = """你是一名资深 AI 行业编辑。下面是一则英文 AI 新闻。请完成两件事：
 
-1) **把英文标题翻译成自然的中文标题**。要求简洁、符合中文新闻标题习惯，不要逐字直译。
-2) **根据正文写一段中文摘要**：2-3 句、不超过 120 字，聚焦「发生了什么 + 为什么重要」。
+1) 把英文标题翻译成**自然的中文新闻标题**。简洁、符合中文习惯，不要逐字直译。
+2) 根据英文正文写一段**中文摘要**：2-3 句、不超过 120 字，聚焦「发生了什么 + 为什么重要」。
 
 严格要求：
+- **输出语言必须全部是中文**，不要输出任何英文。JSON 的 key 保持原样，但 value 必须是中文
 - 仅基于所给正文中的信息，**严禁编造**任何数字、日期、人名、机构或未提及的细节
 - 正文信息稀少时摘要可以只写 1 句，不要凑字数
-- 不使用套话（如「值得关注」「业内人士认为」等），不加表情，不加任何前后缀
-- **严格按下面的 JSON 格式输出**，不要在 JSON 外输出任何其他文字、注释或 Markdown code fence：
+- 不使用套话（如「值得关注」「业内人士认为」等），不加表情
 
-{{"title_zh": "<中文标题>", "summary_zh": "<中文摘要>"}}
+返回 JSON 对象，结构如下（两个字段都必须是中文字符串）：
+{{"title_zh": "中文标题", "summary_zh": "中文摘要"}}
 
 英文标题：{title}
 来源：{source}
@@ -377,8 +383,12 @@ def _get_llm_client():
     return OpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL, timeout=LLM_TIMEOUT)
 
 
-def _call_llm(prompt: str, max_out: int = 420) -> str | None:
-    """Thin wrapper around chat.completions.create with param-name fallback."""
+def _call_llm(prompt: str, max_out: int = 420, json_mode: bool = False) -> str | None:
+    """
+    Thin wrapper around chat.completions.create with:
+      - param-name fallback (max_completion_tokens vs max_tokens)
+      - optional JSON mode via response_format={"type": "json_object"}
+    """
     if not LLM_API_KEY:
         logger.warning("LLM_API_KEY not configured — summarization disabled")
         return None
@@ -389,6 +399,8 @@ def _call_llm(prompt: str, max_out: int = 420) -> str | None:
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
         )
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
         # gpt-5.x / o-series require max_completion_tokens, legacy uses max_tokens.
         try:
             resp = client.chat.completions.create(max_completion_tokens=max_out, **kwargs)
@@ -425,11 +437,13 @@ def summarize_and_translate_en(title: str, text: str, source: str) -> dict | Non
       - title_zh    : a Chinese translation of the title
       - summary_zh  : a Chinese summary of the article body
 
-    Returns a dict with those two keys, or None on failure. If the LLM returns
-    prose instead of JSON, we fall back to {"title_zh": None, "summary_zh": prose}
-    so the caller can at least use the Chinese summary.
+    Uses the LLM's JSON mode (response_format={"type": "json_object"}) to
+    guarantee a parseable object. Returns None on any failure.
     """
-    out = _call_llm(_PROMPT_EN_TO_ZH.format(title=title, source=source, text=text))
+    out = _call_llm(
+        _PROMPT_EN_TO_ZH.format(title=title, source=source, text=text),
+        json_mode=True,
+    )
     if not out:
         return None
 
