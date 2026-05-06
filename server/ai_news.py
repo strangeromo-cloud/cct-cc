@@ -452,18 +452,29 @@ def select_top_per_category(
 #  Orchestration helper (used by /api/jobs/ai-news-digest)
 # ══════════════════════════════════════════════════════════════════════
 
-def fetch_and_select(hours: int = 24) -> dict:
+def fetch_and_select(hours: int = 24, use_ai_classifier: bool = True) -> dict:
     """
     Full pipeline up to (but not including) summarization.
-    Returns the structure expected by ai_summarizer.summarize_batch() and the
-    email template:
+
+    Pipeline:
+      1. fetch_ai_news_raw      — broad bilingual RSS fetch (per-query tags)
+      2. dedup_and_rank         — collapse near-duplicates / shared-entity stories
+      3. AI classifier (NEW)    — LLM re-tags every survivor by reading the
+                                   title against ai_interests.txt; rejects
+                                   weak matches. Falls back to query tags on
+                                   any error so the digest still ships.
+      4. select_top_per_category — final 6 items by min/max ranges + priority
+
+    Returns the structure expected by ai_summarizer.summarize_batch() and
+    the email template:
 
         {
           "generated_at": ISO,
           "window_hours": int,
           "total": int,                 # selected count
-          "raw_total": int,             # pre-dedup count (for debugging)
-          "unique_total": int,          # post-dedup count (for debugging)
+          "raw_total": int,             # pre-dedup count
+          "unique_total": int,          # post-dedup count
+          "classifier_stats": {...} | None,  # AI classifier provenance
           "by_category": {
               "model_product": [NewsItem dicts],
               "business":      [NewsItem dicts],
@@ -473,7 +484,18 @@ def fetch_and_select(hours: int = 24) -> dict:
     """
     raw = fetch_ai_news_raw(hours=hours)
     unique = dedup_and_rank(raw)
-    selected = select_top_per_category(unique)
+
+    classifier_stats: dict | None = None
+    candidates: list[NewsItem] = unique
+    if use_ai_classifier:
+        try:
+            from ai_classifier import reclassify_news
+            candidates, classifier_stats = reclassify_news(unique)
+        except Exception as e:
+            logger.warning(f"AI classifier raised, falling back to query tags: {e}")
+            classifier_stats = {"error": f"{type(e).__name__}: {e}", "used": False}
+
+    selected = select_top_per_category(candidates)
 
     # Convert to dicts so downstream stages (summarizer, email) can mutate freely
     by_category = {cat: [it.to_dict() for it in items] for cat, items in selected.items()}
@@ -485,5 +507,6 @@ def fetch_and_select(hours: int = 24) -> dict:
         "total": total,
         "raw_total": len(raw),
         "unique_total": len(unique),
+        "classifier_stats": classifier_stats,
         "by_category": by_category,
     }
