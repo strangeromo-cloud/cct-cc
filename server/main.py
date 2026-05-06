@@ -242,6 +242,7 @@ async def api_jobs_ai_news_digest(
     dry_run: bool = Query(False, description="Fetch + render only, do not send email"),
     skip_summary: bool = Query(False, description="Skip LLM summarization (faster preview)"),
     skip_ai_classifier: bool = Query(False, description="Skip LLM re-classification, use raw query tags"),
+    skip_ai_dedup: bool = Query(False, description="Skip LLM cluster dedup (keeps near-duplicates)"),
 ):
     """
     Produce + send the daily AI news digest.
@@ -264,7 +265,11 @@ async def api_jobs_ai_news_digest(
     """
     _require_job_token(authorization)
 
-    digest = fetch_and_select(hours=hours, use_ai_classifier=not skip_ai_classifier)
+    digest = fetch_and_select(
+        hours=hours,
+        use_ai_classifier=not skip_ai_classifier,
+        use_ai_dedup=not skip_ai_dedup,
+    )
 
     if not skip_summary:
         summarize_batch(digest)
@@ -285,6 +290,7 @@ async def api_jobs_ai_news_digest(
         "raw_total": digest.get("raw_total"),
         "unique_total": digest.get("unique_total"),
         "classifier_stats": digest.get("classifier_stats"),
+        "dedup_stats": digest.get("dedup_stats"),
         "summary_stats": digest.get("summary_stats"),
         "email": result,
         "counts_by_category": {k: len(v) for k, v in digest.get("by_category", {}).items()},

@@ -302,6 +302,7 @@ def fetch_ai_news_raw(hours: int = 24) -> list[NewsItem]:
 # ══════════════════════════════════════════════════════════════════════
 
 _DEDUP_RATIO = 0.65    # SequenceMatcher threshold for pure title similarity
+_CLUSTER_PROMPT_FILE = "config/ai_filter/cluster_prompt.txt"
 
 
 def _same_story(a: NewsItem, b: NewsItem, a_norm: str, b_norm: str) -> bool:
@@ -365,6 +366,150 @@ def dedup_and_rank(items: list[NewsItem]) -> list[NewsItem]:
     result.sort(key=lambda x: x.published_at, reverse=True)
     logger.info(f"Dedup: {len(items)} raw -> {len(result)} unique groups")
     return result
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  Step 2.5 — LLM-based cluster dedup (catches "same event, different
+#             sources" pairs that string similarity + entity match miss)
+# ══════════════════════════════════════════════════════════════════════
+
+def _load_cluster_prompt() -> str | None:
+    """Read the clustering prompt template, relative to this file."""
+    from pathlib import Path
+    p = Path(__file__).parent / _CLUSTER_PROMPT_FILE
+    if not p.exists():
+        logger.warning(f"cluster_prompt.txt not found at {p}")
+        return None
+    return p.read_text(encoding="utf-8").strip() or None
+
+
+def _build_cluster_news_list(items: list[NewsItem]) -> str:
+    """Render `id. [lang][source] title` for the cluster prompt."""
+    lines: list[str] = []
+    for i, it in enumerate(items, start=1):
+        title = " ".join(it.title.split())[:240]
+        # Source helps the LLM see "different outlets reporting the same thing".
+        lines.append(f"{i}. [{it.lang}][{it.source}] {title}")
+    return "\n".join(lines)
+
+
+def _parse_clusters(raw: str, item_count: int) -> list[list[int]] | None:
+    """
+    Parse the LLM JSON response into a list-of-lists of 1-based item IDs.
+    Performs basic validation: every input id must end up in exactly one cluster.
+    Items the LLM forgot are added back as singleton clusters so we never lose data.
+    """
+    import json
+
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        logger.warning("cluster_duplicates: response is not valid JSON")
+        return None
+
+    raw_clusters = (data.get("clusters") if isinstance(data, dict) else None) or []
+    if not isinstance(raw_clusters, list):
+        return None
+
+    seen: set[int] = set()
+    parsed: list[list[int]] = []
+    for entry in raw_clusters:
+        if not isinstance(entry, dict):
+            continue
+        ids_field = entry.get("ids")
+        if not isinstance(ids_field, list):
+            continue
+        cluster: list[int] = []
+        for x in ids_field:
+            try:
+                idx = int(x)
+            except (TypeError, ValueError):
+                continue
+            if 1 <= idx <= item_count and idx not in seen:
+                seen.add(idx)
+                cluster.append(idx)
+        if cluster:
+            parsed.append(cluster)
+
+    # Add singleton clusters for any input id the LLM forgot (defensive — the
+    # prompt asks for full coverage, but we don't trust it blindly).
+    for idx in range(1, item_count + 1):
+        if idx not in seen:
+            parsed.append([idx])
+
+    return parsed
+
+
+def cluster_duplicates(items: list[NewsItem]) -> tuple[list[NewsItem], dict]:
+    """
+    Use the LLM to cluster `items` into "same story" groups, then keep one
+    representative per cluster (highest source authority, then most recent).
+
+    Returns (deduplicated_items, stats). On failure, returns (items, stats)
+    with `error` populated so the digest still ships.
+    """
+    stats = {
+        "used": False,
+        "input_total": len(items),
+        "clusters_found": 0,
+        "kept": len(items),
+        "merged_away": 0,
+        "error": None,
+    }
+    if len(items) < 3:
+        # Nothing meaningful to cluster.
+        return items, stats
+
+    template = _load_cluster_prompt()
+    if not template:
+        stats["error"] = "cluster_prompt.txt missing"
+        return items, stats
+
+    prompt = template.format(
+        news_count=len(items),
+        news_list=_build_cluster_news_list(items),
+    )
+
+    # Reuse the same LLM helper used elsewhere; JSON-mode forces a parseable
+    # response so we don't waste retries on stray prose.
+    try:
+        from ai_summarizer import _call_llm
+    except ImportError as e:
+        stats["error"] = f"ai_summarizer import failed: {e}"
+        return items, stats
+
+    out = _call_llm(prompt, max_out=2000, json_mode=True)
+    if not out:
+        stats["error"] = "LLM returned empty"
+        return items, stats
+
+    clusters = _parse_clusters(out, len(items))
+    if clusters is None:
+        stats["error"] = "could not parse cluster JSON"
+        return items, stats
+
+    stats["used"] = True
+    stats["clusters_found"] = len(clusters)
+
+    # Pick the best representative from each cluster: highest source authority,
+    # then latest publication. This mirrors dedup_and_rank's tie-breaker so
+    # the two passes are consistent.
+    deduped: list[NewsItem] = []
+    for cluster_ids in clusters:
+        cluster_items = [items[i - 1] for i in cluster_ids]
+        best = max(
+            cluster_items,
+            key=lambda x: (source_authority(x.source), x.published_at),
+        )
+        deduped.append(best)
+
+    stats["kept"] = len(deduped)
+    stats["merged_away"] = len(items) - len(deduped)
+    logger.info(
+        f"cluster_duplicates: input={len(items)} clusters={len(clusters)} "
+        f"kept={len(deduped)} merged_away={stats['merged_away']}"
+    )
+    return deduped, stats
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -452,34 +597,35 @@ def select_top_per_category(
 #  Orchestration helper (used by /api/jobs/ai-news-digest)
 # ══════════════════════════════════════════════════════════════════════
 
-def fetch_and_select(hours: int = 24, use_ai_classifier: bool = True) -> dict:
+def fetch_and_select(
+    hours: int = 24,
+    use_ai_classifier: bool = True,
+    use_ai_dedup: bool = True,
+) -> dict:
     """
     Full pipeline up to (but not including) summarization.
 
     Pipeline:
-      1. fetch_ai_news_raw      — broad bilingual RSS fetch (per-query tags)
-      2. dedup_and_rank         — collapse near-duplicates / shared-entity stories
-      3. AI classifier (NEW)    — LLM re-tags every survivor by reading the
-                                   title against ai_interests.txt; rejects
-                                   weak matches. Falls back to query tags on
-                                   any error so the digest still ships.
-      4. select_top_per_category — final 6 items by min/max ranges + priority
+      1. fetch_ai_news_raw       — broad bilingual RSS fetch (per-query seed tags)
+      2. dedup_and_rank          — collapse near-duplicates / shared-entity stories
+                                    (cheap string + model-name heuristic)
+      3. reclassify_news         — LLM re-tags every survivor by reading the title
+                                    against ai_interests.txt; rejects weak matches
+      4. cluster_duplicates      — LLM clusters remaining items into "same event"
+                                    groups and keeps one representative each
+                                    (catches "official blog + WSJ + TechCrunch
+                                    coverage of the same launch" trios)
+      5. select_top_per_category — final 6 items by min/max ranges + priority
 
-    Returns the structure expected by ai_summarizer.summarize_batch() and
-    the email template:
+    Steps 3-4 each fall back transparently on any error so the digest still
+    ships. Returns the structure expected by ai_summarizer.summarize_batch():
 
         {
-          "generated_at": ISO,
-          "window_hours": int,
-          "total": int,                 # selected count
-          "raw_total": int,             # pre-dedup count
-          "unique_total": int,          # post-dedup count
-          "classifier_stats": {...} | None,  # AI classifier provenance
-          "by_category": {
-              "model_product": [NewsItem dicts],
-              "business":      [NewsItem dicts],
-              "policy_risk":   [NewsItem dicts],
-          }
+          "generated_at": ISO, "window_hours": int,
+          "total": int, "raw_total": int, "unique_total": int,
+          "classifier_stats": {...} | None,
+          "dedup_stats":      {...} | None,
+          "by_category": {...},
         }
     """
     raw = fetch_ai_news_raw(hours=hours)
@@ -495,9 +641,16 @@ def fetch_and_select(hours: int = 24, use_ai_classifier: bool = True) -> dict:
             logger.warning(f"AI classifier raised, falling back to query tags: {e}")
             classifier_stats = {"error": f"{type(e).__name__}: {e}", "used": False}
 
+    dedup_stats: dict | None = None
+    if use_ai_dedup:
+        try:
+            candidates, dedup_stats = cluster_duplicates(candidates)
+        except Exception as e:
+            logger.warning(f"AI dedup raised, falling back to existing dedup: {e}")
+            dedup_stats = {"error": f"{type(e).__name__}: {e}", "used": False}
+
     selected = select_top_per_category(candidates)
 
-    # Convert to dicts so downstream stages (summarizer, email) can mutate freely
     by_category = {cat: [it.to_dict() for it in items] for cat, items in selected.items()}
     total = sum(len(v) for v in by_category.values())
 
@@ -508,5 +661,6 @@ def fetch_and_select(hours: int = 24, use_ai_classifier: bool = True) -> dict:
         "raw_total": len(raw),
         "unique_total": len(unique),
         "classifier_stats": classifier_stats,
+        "dedup_stats": dedup_stats,
         "by_category": by_category,
     }
