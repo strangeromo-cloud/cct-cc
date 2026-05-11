@@ -95,26 +95,30 @@ def render_digest_html(digest: dict) -> str:
 
         cards: list[str] = []
         for it in items:
-            original_title = it.get("title", "") or ""
-            # For EN-language items we show the LLM-translated Chinese title and
-            # keep the original as a smaller secondary line so the reader still
-            # sees the real publisher headline before clicking through.
-            title_zh = (it.get("title_zh") or "").strip()
-            display_title = escape(title_zh or original_title)
-            original_subtitle = ""
+            original_title = (it.get("title") or "").strip()
+            title_zh       = (it.get("title_zh") or "").strip()
+            summary_zh     = (it.get("summary") or "").strip()
+            summary_en     = (it.get("summary_en") or "").strip()
             lang = it.get("lang", "en")
-            if title_zh and original_title and lang == "en":
-                original_subtitle = (
-                    f'<div style="font-size:11px;color:#999;font-style:italic;'
-                    f'margin:2px 0 6px 0;line-height:1.4">{escape(original_title)}</div>'
-                )
 
-            # Prefer the resolved publisher URL if we have it, else the Google News link
+            # ── Card body layout ───────────────────────────────────────
+            # English-source items show ENGLISH original first (title + EN summary
+            # as the primary content), then a Chinese "译文" block beneath.
+            # Chinese-source items render Chinese only (no translation pair).
+            if lang == "en":
+                primary_title    = original_title
+                primary_summary  = summary_en
+                secondary_title  = title_zh
+                secondary_summary = summary_zh
+            else:
+                primary_title    = original_title
+                primary_summary  = summary_zh
+                secondary_title  = ""
+                secondary_summary = ""
+
+            # Prefer the resolved publisher URL if we have it, else the input link
             href = escape(it.get("resolved_url") or it.get("link", ""), quote=True)
             src = escape(it.get("source", ""))
-            # `summary` is the Chinese LLM summary when available, else RSS fallback
-            summary_text = it.get("summary") or it.get("description", "")
-            summary = escape(summary_text)
             date = escape(_fmt_date(it.get("publishedAt", "")))
             tag = escape(zh_label)
             lang_badge = "EN" if lang == "en" else "中"
@@ -124,16 +128,44 @@ def render_digest_html(digest: dict) -> str:
             src_label_html = ""
             if src_provenance == "llm":
                 src_label_html = '<span style="margin-left:6px;font-size:10px;color:#888;font-style:italic">AI 摘要</span>'
+            elif src_provenance == "aihot":
+                src_label_html = '<span style="margin-left:6px;font-size:10px;color:#888;font-style:italic">AI HOT 摘要</span>'
             elif src_provenance == "rss":
                 src_label_html = '<span style="margin-left:6px;font-size:10px;color:#bbb;font-style:italic">RSS</span>'
+
+            # Build the optional secondary (Chinese) translation block — only
+            # rendered for EN items where we actually have a Chinese translation.
+            translation_block = ""
+            if secondary_title or secondary_summary:
+                parts: list[str] = []
+                parts.append(
+                    '<div style="display:flex;align-items:center;margin:10px 0 4px 0">'
+                    '<span style="display:inline-block;padding:1px 6px;border-radius:3px;'
+                    f'background:#FDEEEE;color:#E12726;font-size:10px;font-weight:600;'
+                    'margin-right:8px">译文</span>'
+                    '<span style="flex:1;height:1px;background:#EEE;display:inline-block"></span>'
+                    '</div>'
+                )
+                if secondary_title:
+                    parts.append(
+                        f'<div style="font-size:13px;color:#444;font-weight:600;line-height:1.4;margin-bottom:4px">'
+                        f'{escape(secondary_title)}</div>'
+                    )
+                if secondary_summary:
+                    parts.append(
+                        f'<div style="font-size:12px;color:#666;line-height:1.55;margin-bottom:8px">'
+                        f'{escape(secondary_summary)}</div>'
+                    )
+                translation_block = "\n".join(parts)
 
             cards.append(f"""
 <div style="margin:0 0 14px;padding:12px 14px;border:1px solid #E5E5E5;border-radius:8px;background:#fff">
   <div style="margin-bottom:6px">
-    <a href="{href}" style="color:#111;text-decoration:none;font-weight:600;font-size:14px;line-height:1.45">{display_title}</a>
+    <a href="{href}" style="color:#111;text-decoration:none;font-weight:600;font-size:14px;line-height:1.45">{escape(primary_title)}</a>
   </div>
-  {original_subtitle}
-  <div style="font-size:11px;color:#888;margin-bottom:6px">
+  {f'<div style="font-size:13px;color:#333;line-height:1.55;margin-bottom:8px">{escape(primary_summary)}</div>' if primary_summary else ''}
+  {translation_block}
+  <div style="font-size:11px;color:#888;margin:6px 0 6px 0">
     <span>{date}</span>
     <span style="margin:0 6px">·</span>
     <span>{src}</span>
@@ -142,7 +174,6 @@ def render_digest_html(digest: dict) -> str:
     <span style="margin-left:6px;display:inline-block;padding:1px 6px;border-radius:3px;background:{color}15;color:{color};font-weight:600">#{tag}</span>
     {src_label_html}
   </div>
-  {f'<div style="font-size:13px;color:#333;line-height:1.55;margin-bottom:8px">{summary}</div>' if summary else ''}
   <a href="{href}" style="font-size:11px;color:{color};text-decoration:none">阅读原文 →</a>
 </div>
 """)
@@ -170,7 +201,7 @@ def render_digest_html(digest: dict) -> str:
     </div>
     {body_inner}
     <div style="border-top:1px solid #EEE;margin-top:22px;padding-top:12px;font-size:11px;color:#999;text-align:center">
-      CFO Control Tower · Automated digest · 数据源：Google News RSS
+      CFO Control Tower · Automated digest · 数据源：Google News RSS + AI HOT
     </div>
   </div>
 </body>
@@ -188,14 +219,24 @@ def render_digest_text(digest: dict) -> str:
         zh = CATEGORY_LABELS[cat]
         lines.append(f"=== {zh} ({len(items)}) ===")
         for it in items:
-            display_title = (it.get("title_zh") or "").strip() or it.get("title", "")
-            lines.append(f"• {display_title}  [{_fmt_date(it.get('publishedAt', ''))}]")
-            if it.get("title_zh") and it.get("lang") == "en":
-                lines.append(f"  (原: {it.get('title')})")
-            lines.append(f"  {it.get('source')}  #{zh}  ({it.get('lang')})")
-            summary = it.get("summary") or it.get("description", "")
-            if summary:
-                lines.append(f"  {summary}")
+            original_title = it.get("title", "")
+            title_zh = (it.get("title_zh") or "").strip()
+            summary_en = (it.get("summary_en") or "").strip()
+            summary_zh = (it.get("summary") or "").strip()
+            lang = it.get("lang", "en")
+
+            lines.append(f"• {original_title}  [{_fmt_date(it.get('publishedAt', ''))}]")
+            lines.append(f"  {it.get('source')}  #{zh}  ({lang})")
+            if lang == "en" and summary_en:
+                lines.append(f"  {summary_en}")
+            elif summary_zh and lang != "en":
+                lines.append(f"  {summary_zh}")
+            if lang == "en" and (title_zh or summary_zh):
+                lines.append(f"  [译文]")
+                if title_zh:
+                    lines.append(f"  {title_zh}")
+                if summary_zh:
+                    lines.append(f"  {summary_zh}")
             lines.append(f"  {it.get('resolved_url') or it.get('link')}")
             lines.append("")
         lines.append("")

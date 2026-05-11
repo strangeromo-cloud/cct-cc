@@ -356,19 +356,22 @@ _PROMPT_ZH = """你是一名资深 AI 行业编辑。请根据下面这则新闻
 # forces the model to return a syntactically valid JSON object — no prose,
 # no markdown fences. The prompt itself then only needs to define the schema
 # and the language/style constraints.
-_PROMPT_EN_TO_ZH = """你是一名资深 AI 行业编辑。下面是一则英文 AI 新闻。请完成两件事：
+_PROMPT_EN_TO_ZH = """你是一名资深 AI 行业编辑。下面是一则英文 AI 新闻。请同时产出**英文摘要 + 中文标题 + 中文摘要**。
 
-1) 把英文标题翻译成**自然的中文新闻标题**。简洁、符合中文习惯，不要逐字直译。
-2) 根据英文正文写一段**中文摘要**：2-3 句、不超过 120 字，聚焦「发生了什么 + 为什么重要」。
+任务清单：
+
+1) **`summary_en`** — 用英文写一段简短摘要：2-3 句，不超过 60 词。focus on "what happened + why it matters"，不要套话。
+2) **`title_zh`** — 把英文标题翻译成**自然的中文新闻标题**。简洁、符合中文习惯，不要逐字直译。
+3) **`summary_zh`** — 根据英文正文写一段中文摘要：2-3 句、不超过 120 字，聚焦「发生了什么 + 为什么重要」。
 
 严格要求：
-- **输出语言必须全部是中文**，不要输出任何英文。JSON 的 key 保持原样，但 value 必须是中文
-- 仅基于所给正文中的信息，**严禁编造**任何数字、日期、人名、机构或未提及的细节
-- 正文信息稀少时摘要可以只写 1 句，不要凑字数
-- 不使用套话（如「值得关注」「业内人士认为」等），不加表情
+- 三个字段都基于所给正文中的信息，**严禁编造**任何数字、日期、人名、机构或未提及的细节
+- 正文信息稀少时允许只写 1 句，不要凑字数
+- `summary_en` 必须全英文；`title_zh` 和 `summary_zh` 必须全中文
+- 不使用套话（如「值得关注」、"it's worth noting"、"notably"），不加表情
+- 严格按下面的 JSON 结构输出，不要任何其他文字：
 
-返回 JSON 对象，结构如下（两个字段都必须是中文字符串）：
-{{"title_zh": "中文标题", "summary_zh": "中文摘要"}}
+{{"summary_en": "English summary in 2-3 sentences", "title_zh": "中文标题", "summary_zh": "中文摘要"}}
 
 英文标题：{title}
 来源：{source}
@@ -433,15 +436,19 @@ def summarize_zh(title: str, text: str, source: str) -> str | None:
 
 def summarize_and_translate_en(title: str, text: str, source: str) -> dict | None:
     """
-    For an English-language article, produce both:
-      - title_zh    : a Chinese translation of the title
-      - summary_zh  : a Chinese summary of the article body
+    For an English-language article, produce all of:
+      - summary_en : English summary (so the email can show the original
+                     language first for English-source items)
+      - title_zh   : Chinese translation of the headline
+      - summary_zh : Chinese summary of the article body
 
-    Uses the LLM's JSON mode (response_format={"type": "json_object"}) to
-    guarantee a parseable object. Returns None on any failure.
+    Single LLM call (JSON mode). Returns None on hard failure; a degraded
+    dict (summary_zh only) if the model refuses JSON.
     """
+    # Slightly bigger token budget now that we ask for 3 fields instead of 2.
     out = _call_llm(
         _PROMPT_EN_TO_ZH.format(title=title, source=source, text=text),
+        max_out=600,
         json_mode=True,
     )
     if not out:
@@ -451,7 +458,6 @@ def summarize_and_translate_en(title: str, text: str, source: str) -> dict | Non
     # not to: ```json ... ```, ``` ... ```
     cleaned = out.strip()
     if cleaned.startswith("```"):
-        # drop first line of fence, and trailing fence
         lines = cleaned.splitlines()
         if lines:
             lines = lines[1:]
@@ -462,15 +468,19 @@ def summarize_and_translate_en(title: str, text: str, source: str) -> dict | Non
     try:
         data = json.loads(cleaned)
     except (json.JSONDecodeError, ValueError):
-        # Fallback: treat the whole thing as summary, leave title untranslated.
-        logger.info("summarize_and_translate_en: LLM returned non-JSON; using raw as summary")
-        return {"title_zh": None, "summary_zh": _strip_prefix(cleaned)}
+        logger.info("summarize_and_translate_en: LLM returned non-JSON; using raw as zh summary")
+        return {"title_zh": None, "summary_zh": _strip_prefix(cleaned), "summary_en": None}
 
     title_zh = (data.get("title_zh") or "").strip() or None
     summary_zh = (data.get("summary_zh") or "").strip() or None
+    summary_en = (data.get("summary_en") or "").strip() or None
     if not summary_zh:
         return None
-    return {"title_zh": title_zh, "summary_zh": _strip_prefix(summary_zh)}
+    return {
+        "title_zh":   title_zh,
+        "summary_zh": _strip_prefix(summary_zh),
+        "summary_en": summary_en,
+    }
 
 
 # ── Back-compat alias (used by /api/jobs/debug/summarize) ────────────
@@ -503,50 +513,59 @@ def _is_trivial_description(desc: str, title: str, source: str) -> bool:
 def _process_one(item: dict) -> dict:
     """
     Fetch + summarize a single item. Mutates `item` in place with:
-      - summary:     str  — final text for the email (may be empty)
-      - summary_src: str  — "llm" | "rss" | "none"
-      - resolved_url: str — real publisher URL (or the input link on failure)
+      - summary:     str  — final Chinese (or original-language) text for the email
+      - summary_en:  str | None — English summary, only for English-sourced items
+      - title_zh:    str | None — Chinese translation of the title, only for EN items
+      - summary_src: str  — "llm" | "rss" | "aihot" | "none"
+      - resolved_url: str — real publisher URL (or input link on failure)
     """
     title = item.get("title", "")
     link = item.get("link", "")
     source = item.get("source", "Unknown")
     lang = item.get("lang", "en")
     rss_desc = item.get("description", "")
+    provenance = item.get("provenance", "google_news")
+
+    # ── Short-circuit for AI HOT items ────────────────────────────────
+    # AI HOT items already arrive with a pre-generated Chinese summary in
+    # `description` and a publisher URL. We use those as-is — no article
+    # refetch, no LLM call. lang is always "zh" so the email renderer
+    # treats them as Chinese-native (no English-original block).
+    if provenance == "aihot" and rss_desc:
+        item["summary"] = rss_desc
+        item["summary_src"] = "aihot"
+        item["title_zh"] = None
+        item["summary_en"] = None
+        item["resolved_url"] = link
+        return item
 
     # Step 1 + 2: resolve Google News redirect → fetch HTML → extract body text
     final_url = resolve_article_url(link)
     effective_url = final_url or link
     article_text = fetch_article_text(final_url) if final_url else None
 
-    # Step 3: produce a Chinese summary (and, for EN sources, a Chinese title
-    # translation — done in the same LLM call via JSON output).
-    #
-    # Order of preference:
-    #   (a) LLM over the full article body
-    #   (b) LLM over the RSS description (only if it has real content, not
-    #       just "Title Source" filler from Google News)
-    #   (c) meaningful RSS description verbatim (always Chinese will not
-    #       happen here — falls back to original language)
-    #   (d) nothing (the email will simply omit the summary line)
+    # Step 3: produce summaries (Chinese always; English + Chinese-title-translation
+    # for EN items so the email can show "original first, translation below").
     summary: str | None = None
     title_zh: str | None = None
+    summary_en: str | None = None
     src = "none"
 
-    def _llm_from(body: str) -> tuple[str | None, str | None]:
-        """Return (summary_zh, title_zh) or (None, None)."""
+    def _llm_from(body: str) -> tuple[str | None, str | None, str | None]:
+        """Return (summary_zh, title_zh, summary_en) or (None, None, None)."""
         if lang == "zh":
-            return summarize_zh(title, body, source), None
+            return summarize_zh(title, body, source), None, None
         result = summarize_and_translate_en(title, body, source)
         if not result:
-            return None, None
-        return result.get("summary_zh"), result.get("title_zh")
+            return None, None, None
+        return result.get("summary_zh"), result.get("title_zh"), result.get("summary_en")
 
     if article_text:
-        summary, title_zh = _llm_from(article_text)
+        summary, title_zh, summary_en = _llm_from(article_text)
         if summary:
             src = "llm"
     if not summary and not _is_trivial_description(rss_desc, title, source):
-        summary, title_zh = _llm_from(rss_desc)
+        summary, title_zh, summary_en = _llm_from(rss_desc)
         if summary:
             src = "llm"
         else:
@@ -555,7 +574,8 @@ def _process_one(item: dict) -> dict:
 
     item["summary"] = summary or ""
     item["summary_src"] = src
-    item["title_zh"] = title_zh  # None for ZH-language items; populated for EN
+    item["title_zh"] = title_zh        # None for ZH; populated for EN with good extraction
+    item["summary_en"] = summary_en    # None for ZH; populated for EN
     item["resolved_url"] = effective_url
     return item
 
@@ -584,10 +604,15 @@ def summarize_batch(digest: dict) -> dict:
             except Exception as e:
                 logger.warning(f"Worker failed: {e}")
 
-    # Stats
-    counts = {"llm": 0, "rss": 0, "none": 0}
+    # Stats — now includes "aihot" provenance for items that came in with a
+    # pre-generated summary from AI HOT and bypassed our LLM.
+    counts = {"llm": 0, "rss": 0, "aihot": 0, "none": 0}
     for it in items:
-        counts[it.get("summary_src", "none")] += 1
-    logger.info(f"Summary provenance: llm={counts['llm']}, rss={counts['rss']}, none={counts['none']}")
+        src = it.get("summary_src", "none")
+        counts[src] = counts.get(src, 0) + 1
+    logger.info(
+        f"Summary provenance: llm={counts['llm']}, rss={counts['rss']}, "
+        f"aihot={counts['aihot']}, none={counts['none']}"
+    )
     digest["summary_stats"] = counts
     return digest

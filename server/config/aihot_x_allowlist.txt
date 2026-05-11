@@ -1,0 +1,45 @@
+# ═══════════════════════════════════════════════════════════════
+#  AI HOT — X (Twitter) 来源白名单
+# ═══════════════════════════════════════════════════════════════
+#
+# AI HOT 把每个 X 来源标记为 "X：Display Name (@handle)"。
+# 非 X 来源（IT之家、Anthropic Blog、GitHub 等）默认全部接收，不受此名单约束。
+# 这里只过滤 X 内容，把噪音降下来。
+#
+# 一行一个 handle（不带 @），大小写不敏感。
+# 以 # 开头的行是注释，会被忽略。
+# 改完不需要改代码，下一次抓取自动生效。
+# ═══════════════════════════════════════════════════════════════
+
+# ── 实验室 / 公司官方账号 ──────────────────────────────────────
+OpenAI
+AnthropicAI
+GoogleDeepMind
+AIatMeta
+MistralAI
+xAI
+huggingface
+Replit
+OpenRouter
+github
+Microsoft
+
+# ── 实验室高管 ─────────────────────────────────────────────────
+sama
+miramurati
+gdb
+ilyasut
+demishassabis
+darioamodei
+sundarpichai
+
+# ── 顶尖研究员 ─────────────────────────────────────────────────
+AndrewYNg
+karpathy
+ylecun
+JeffDean
+geoffreyhinton
+
+# ── 中文圈高信号 ───────────────────────────────────────────────
+dotey
+shao__meng

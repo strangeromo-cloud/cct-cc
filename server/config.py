@@ -28,3 +28,8 @@ JOB_TOKEN = os.getenv("JOB_TOKEN", "")
 SMTP_USER = os.getenv("SMTP_USER", "")              # e.g. strangeromo@gmail.com
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")      # 16-char App Password
 DIGEST_RECIPIENT = os.getenv("DIGEST_RECIPIENT", "")  # e.g. xujz4@lenovo.com
+
+# ── External feed integrations ───────────────────────────────────────
+# AI HOT (aihot.virxact.com) supplements Google News with curated X /
+# official-blog content. Default on. Set to "false" / "0" to disable.
+INCLUDE_AIHOT_FEED = os.getenv("INCLUDE_AIHOT_FEED", "true").strip().lower() not in ("0", "false", "no", "off", "")

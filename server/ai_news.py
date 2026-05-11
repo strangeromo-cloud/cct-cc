@@ -208,9 +208,13 @@ class NewsItem:
     link: str
     source: str
     published_at: str       # ISO string
-    tag: str                # category key
-    lang: str               # "en" | "zh"
-    description: str        # cleaned RSS description
+    tag: str                # category key (seed; reclassifier may overwrite)
+    lang: str               # "en" | "zh" — display language of title/summary
+    description: str        # cleaned RSS description or external pre-summary
+    # Where this item came from. "google_news" (default) goes through our full
+    # fetch→trafilatura→LLM pipeline. "aihot" already has a Chinese summary
+    # baked in (item.description) and skips the summarizer.
+    provenance: str = "google_news"
 
     def to_dict(self) -> dict:
         return {
@@ -221,6 +225,7 @@ class NewsItem:
             "tag":         self.tag,
             "lang":        self.lang,
             "description": self.description,
+            "provenance":  self.provenance,
         }
 
 
@@ -294,6 +299,40 @@ def fetch_ai_news_raw(hours: int = 24) -> list[NewsItem]:
             continue
 
     logger.info(f"AI news raw fetch: {len(items)} items across {len(AI_NEWS_QUERIES)} queries")
+
+    # ── Supplement with AI HOT (aihot.virxact.com) curated feed ─────────
+    try:
+        from config import INCLUDE_AIHOT_FEED
+    except ImportError:
+        INCLUDE_AIHOT_FEED = False
+    if INCLUDE_AIHOT_FEED:
+        try:
+            from aihot_client import fetch_aihot_items
+            extras = fetch_aihot_items(hours=hours)
+        except Exception as e:
+            logger.warning(f"AI HOT integration failed (continuing with Google News only): {e}")
+            extras = []
+
+        added = 0
+        for d in extras:
+            # Skip cross-source duplicates by URL — if Google News already gave us
+            # this exact publisher URL, the LLM cluster dedup will handle it.
+            if d["link"] in seen_links:
+                continue
+            seen_links.add(d["link"])
+            items.append(NewsItem(
+                title=d["title"],
+                link=d["link"],
+                source=d["source"],
+                published_at=d["published_at"],
+                tag=d["tag"],
+                lang=d["lang"],
+                description=d["description"],
+                provenance=d["provenance"],
+            ))
+            added += 1
+        logger.info(f"AI HOT supplement: +{added} items (total now {len(items)})")
+
     return items
 
 
