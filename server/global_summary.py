@@ -75,17 +75,24 @@ async def stream_global_summary(data: dict) -> AsyncIterator[str]:
 
         yield json.dumps({"type": "thinking", "content": "正在生成分析总结..."})
 
-        # Stream LLM response
+        # Stream LLM response. gpt-5.x and o-series only accept the default
+        # temperature; retry without the param if the server rejects 0.3.
         full_text = ""
-        stream = await client.chat.completions.create(
+        base_kwargs = dict(
             model=LLM_MODEL,
             messages=[
                 {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
                 {"role": "user", "content": user_msg},
             ],
             stream=True,
-            temperature=0.3,
         )
+        try:
+            stream = await client.chat.completions.create(temperature=0.3, **base_kwargs)
+        except Exception as e:
+            if "temperature" in str(e).lower():
+                stream = await client.chat.completions.create(**base_kwargs)
+            else:
+                raise
 
         async for chunk in stream:
             if chunk.choices and chunk.choices[0].delta.content:

@@ -312,19 +312,30 @@ async def api_jobs_debug_llm(authorization: str | None = Header(default=None)):
     try:
         from openai import OpenAI
         client = OpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL, timeout=30)
-        # Try the modern param name; fall back to the legacy one.
-        kwargs = dict(
-            model=LLM_MODEL,
-            messages=[{"role": "user", "content": "Reply with exactly: pong"}],
-            temperature=0,
-        )
-        try:
-            resp = client.chat.completions.create(max_completion_tokens=10, **kwargs)
-        except Exception as e:
-            if "max_completion_tokens" in str(e).lower():
-                resp = client.chat.completions.create(max_tokens=10, **kwargs)
-            else:
+        # Cycle through fallbacks: gpt-5.x style + custom temp ↓ legacy +
+        # default temp. Same logic as ai_summarizer._call_llm.
+        def _try(with_temp: bool, with_mc: bool):
+            kw = dict(model=LLM_MODEL, messages=[{"role": "user", "content": "Reply with exactly: pong"}])
+            if with_temp:
+                kw["temperature"] = 0
+            if with_mc:
+                return client.chat.completions.create(max_completion_tokens=10, **kw)
+            return client.chat.completions.create(max_tokens=10, **kw)
+
+        resp = None
+        last_err = None
+        for with_temp, with_mc in [(True, True), (True, False), (False, True), (False, False)]:
+            try:
+                resp = _try(with_temp, with_mc)
+                break
+            except Exception as e:
+                msg = str(e).lower()
+                if "max_completion_tokens" in msg or "max_tokens" in msg or "temperature" in msg:
+                    last_err = e
+                    continue
                 raise
+        if resp is None:
+            raise last_err or Exception("All LLM fallbacks exhausted")
         result["response_content"] = resp.choices[0].message.content
         result["finish_reason"] = resp.choices[0].finish_reason
         result["usage"] = resp.usage.model_dump() if resp.usage else None

@@ -226,14 +226,21 @@ async def chat(
 
     # Agent loop — up to 3 rounds of tool calling
     for _ in range(3):
+        base_kwargs = dict(
+            model=LLM_MODEL,
+            messages=messages,
+            tools=TOOLS,
+            tool_choice="auto",
+        )
         try:
-            response = await client.chat.completions.create(
-                model=LLM_MODEL,
-                messages=messages,
-                tools=TOOLS,
-                tool_choice="auto",
-                temperature=0.3,
-            )
+            try:
+                # gpt-5.x and o-series reject custom temperature; retry without it.
+                response = await client.chat.completions.create(temperature=0.3, **base_kwargs)
+            except Exception as e:
+                if "temperature" in str(e).lower():
+                    response = await client.chat.completions.create(**base_kwargs)
+                else:
+                    raise
         except Exception as e:
             logger.error(f"LLM API error: {e}")
             return {
@@ -331,13 +338,19 @@ async def chat_stream(
     for _ in range(3):
         try:
             yield json.dumps({"type": "thinking", "content": "调用 AI 模型分析意图..." if tool_round == 0 else "基于数据进一步推理..."})
-            response = await client.chat.completions.create(
+            base_kwargs = dict(
                 model=LLM_MODEL,
                 messages=messages,
                 tools=TOOLS,
                 tool_choice="auto",
-                temperature=0.3,
             )
+            try:
+                response = await client.chat.completions.create(temperature=0.3, **base_kwargs)
+            except Exception as inner:
+                if "temperature" in str(inner).lower():
+                    response = await client.chat.completions.create(**base_kwargs)
+                else:
+                    raise
         except Exception as e:
             yield json.dumps({"type": "error", "content": str(e)[:200]})
             return
@@ -372,12 +385,18 @@ async def chat_stream(
 
     # Second pass: stream the final answer
     try:
-        stream = await client.chat.completions.create(
+        base_kwargs = dict(
             model=LLM_MODEL,
             messages=messages,
             stream=True,
-            temperature=0.3,
         )
+        try:
+            stream = await client.chat.completions.create(temperature=0.3, **base_kwargs)
+        except Exception as inner:
+            if "temperature" in str(inner).lower():
+                stream = await client.chat.completions.create(**base_kwargs)
+            else:
+                raise
 
         full_content = ""
         async for chunk in stream:

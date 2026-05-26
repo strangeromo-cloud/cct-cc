@@ -388,34 +388,53 @@ def _get_llm_client():
 
 def _call_llm(prompt: str, max_out: int = 420, json_mode: bool = False) -> str | None:
     """
-    Thin wrapper around chat.completions.create with:
-      - param-name fallback (max_completion_tokens vs max_tokens)
-      - optional JSON mode via response_format={"type": "json_object"}
+    Thin wrapper around chat.completions.create with three fallbacks to
+    handle differences across OpenAI / DeepSeek / etc.:
+
+      - max_tokens vs max_completion_tokens   (gpt-5.x / o-series rename)
+      - temperature 0.3 vs default            (gpt-5.x rejects custom temp)
+      - response_format JSON mode             (optional)
     """
     if not LLM_API_KEY:
         logger.warning("LLM_API_KEY not configured — summarization disabled")
         return None
-    try:
-        client = _get_llm_client()
+
+    def _do_call(with_temperature: bool, with_max_completion: bool) -> object:
         kwargs = dict(
             model=LLM_MODEL,
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
         )
+        if with_temperature:
+            kwargs["temperature"] = 0.3
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
-        # gpt-5.x / o-series require max_completion_tokens, legacy uses max_tokens.
+        client = _get_llm_client()
+        if with_max_completion:
+            return client.chat.completions.create(max_completion_tokens=max_out, **kwargs)
+        return client.chat.completions.create(max_tokens=max_out, **kwargs)
+
+    # Try modern + custom-temperature first; degrade on specific 400 errors.
+    attempts = [
+        (True,  True),    # gpt-5.x style + 0.3 temperature
+        (True,  False),   # legacy max_tokens + 0.3 temperature
+        (False, True),    # gpt-5.x style + default temperature (gpt-5 actual)
+        (False, False),   # legacy max_tokens + default temperature
+    ]
+    last_error: Exception | None = None
+    for with_temp, with_mc in attempts:
         try:
-            resp = client.chat.completions.create(max_completion_tokens=max_out, **kwargs)
+            resp = _do_call(with_temp, with_mc)
+            return (resp.choices[0].message.content or "").strip() or None
         except Exception as e:
-            if "max_completion_tokens" in str(e).lower():
-                resp = client.chat.completions.create(max_tokens=max_out, **kwargs)
-            else:
-                raise
-        return (resp.choices[0].message.content or "").strip() or None
-    except Exception as e:
-        logger.warning(f"LLM call failed: {type(e).__name__}: {e}")
-        return None
+            msg = str(e).lower()
+            # Specific 400 errors → retry with a different combo.
+            if "max_completion_tokens" in msg or "max_tokens" in msg or "temperature" in msg:
+                last_error = e
+                continue
+            logger.warning(f"LLM call failed: {type(e).__name__}: {e}")
+            return None
+    logger.warning(f"LLM call failed after all fallbacks: {last_error}")
+    return None
 
 
 _PREFIX_STRIPS = ("摘要：", "摘要:", "Summary:", "**摘要**", "## 摘要")
