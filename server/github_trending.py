@@ -25,7 +25,11 @@ SEARCH_URL = "https://api.github.com/search/repositories"
 
 # AI-relevant keywords OR'd into the free-text query. GitHub searches the
 # repo name, description and README.
-_QUERY = '(AI OR LLM OR "large language model" OR agent OR "machine learning" OR GPT OR diffusion)'
+#
+# NOTE: GitHub's repository search rejects queries with more than 5 logical
+# operators ("Validation Failed"). Keep this to <=4 OR terms. Quoted
+# multi-word phrases also count heavily, so we stick to single tokens.
+_QUERY = "AI OR LLM OR agent OR GPT"
 
 
 def fetch_trending_repos(days: int = 30, limit: int = 5, min_stars: int = 200) -> list[dict]:
