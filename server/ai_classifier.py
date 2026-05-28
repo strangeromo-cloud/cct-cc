@@ -215,7 +215,9 @@ def classify_batch(items: list["NewsItem"]) -> list[dict] | None:
         news_list=news_list,
     )
 
-    out = _call_llm(prompt, max_out=1500, json_mode=True)
+    # Generous budget: reasoning models burn tokens on the ~50-80 item batch
+    # before emitting JSON; too small a cap yields empty output.
+    out = _call_llm(prompt, max_out=8000, json_mode=True)
     if not out:
         return None
 

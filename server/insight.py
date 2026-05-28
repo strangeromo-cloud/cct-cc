@@ -67,7 +67,8 @@ def generate_lenovo_insight(digest: dict) -> str | None:
     from ai_summarizer import _call_llm
 
     prompt = _INSIGHT_PROMPT.format(content=content)
-    out = _call_llm(prompt, max_out=800)
+    # Generous budget — reasoning tokens + a multi-bullet Chinese briefing.
+    out = _call_llm(prompt, max_out=3000)
     if not out:
         return None
     return out.strip()

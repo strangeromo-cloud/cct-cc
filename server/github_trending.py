@@ -100,7 +100,7 @@ def translate_repo_descriptions(repos: list[dict]) -> None:
         '{"translations": [{"id": 0, "zh": "中文翻译"}]}\n\n'
         + "\n".join(lines)
     )
-    out = _call_llm(prompt, max_out=800, json_mode=True)
+    out = _call_llm(prompt, max_out=3000, json_mode=True)
     if not out:
         return
     try:

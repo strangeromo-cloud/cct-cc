@@ -517,7 +517,9 @@ def cluster_duplicates(items: list[NewsItem]) -> tuple[list[NewsItem], dict]:
         stats["error"] = f"ai_summarizer import failed: {e}"
         return items, stats
 
-    out = _call_llm(prompt, max_out=2000, json_mode=True)
+    # Generous budget: reasoning models spend tokens thinking over the whole
+    # batch before emitting cluster JSON; a small cap yields empty output.
+    out = _call_llm(prompt, max_out=8000, json_mode=True)
     if not out:
         stats["error"] = "LLM returned empty"
         return items, stats

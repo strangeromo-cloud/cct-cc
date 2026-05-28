@@ -388,7 +388,7 @@ def _get_llm_client():
     return OpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL, timeout=LLM_TIMEOUT)
 
 
-def _call_llm(prompt: str, max_out: int = 420, json_mode: bool = False) -> str | None:
+def _call_llm(prompt: str, max_out: int = 2000, json_mode: bool = False) -> str | None:
     """
     Thin wrapper around chat.completions.create with three fallbacks to
     handle differences across OpenAI / DeepSeek / etc.:
@@ -396,6 +396,12 @@ def _call_llm(prompt: str, max_out: int = 420, json_mode: bool = False) -> str |
       - max_tokens vs max_completion_tokens   (gpt-5.x / o-series rename)
       - temperature 0.3 vs default            (gpt-5.x rejects custom temp)
       - response_format JSON mode             (optional)
+
+    IMPORTANT for reasoning models (gpt-5.x / o-series): max_completion_tokens
+    budgets reasoning tokens AND visible output together. If it's too small the
+    model spends the whole budget thinking and returns EMPTY content. So
+    `max_out` must be generous — small values silently produce empty results,
+    not errors. Default raised to 2000; big batch calls pass much more.
     """
     if not LLM_API_KEY:
         logger.warning("LLM_API_KEY not configured — summarization disabled")
@@ -466,10 +472,11 @@ def summarize_and_translate_en(title: str, text: str, source: str) -> dict | Non
     Single LLM call (JSON mode). Returns None on hard failure; a degraded
     dict (summary_zh only) if the model refuses JSON.
     """
-    # Slightly bigger token budget now that we ask for 3 fields instead of 2.
+    # Generous budget: reasoning tokens + 3 output fields. Too small a cap on
+    # gpt-5.x produces empty content.
     out = _call_llm(
         _PROMPT_EN_TO_ZH.format(title=title, source=source, text=text),
-        max_out=600,
+        max_out=3000,
         json_mode=True,
     )
     if not out:
