@@ -33,3 +33,7 @@ DIGEST_RECIPIENT = os.getenv("DIGEST_RECIPIENT", "")  # e.g. xujz4@lenovo.com
 # AI HOT (aihot.virxact.com) supplements Google News with curated X /
 # official-blog content. Default on. Set to "false" / "0" to disable.
 INCLUDE_AIHOT_FEED = os.getenv("INCLUDE_AIHOT_FEED", "true").strip().lower() not in ("0", "false", "no", "off", "")
+
+# Optional — raises the GitHub Search API rate limit for the trending-repos
+# section. We make 1 request per digest, so anonymous access is usually fine.
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")

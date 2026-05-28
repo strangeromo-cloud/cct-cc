@@ -182,6 +182,12 @@ def render_digest_html(digest: dict) -> str:
 
     body_inner = "\n".join(blocks)
 
+    # ── GitHub trending repos section (after news categories) ──────────
+    github_block = _render_github_section(digest.get("github_repos") or [])
+
+    # ── Lenovo insight block (bottom, before footer) ──────────────────
+    insight_block = _render_insight_section(digest.get("lenovo_insight"))
+
     return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -200,12 +206,95 @@ def render_digest_html(digest: dict) -> str:
       </div>
     </div>
     {body_inner}
+    {github_block}
+    {insight_block}
     <div style="border-top:1px solid #EEE;margin-top:22px;padding-top:12px;font-size:11px;color:#999;text-align:center">
-      CFO Control Tower · Automated digest · 数据源：Google News RSS + AI HOT
+      CFO Control Tower · Automated digest · 数据源：Google News RSS + AI HOT + GitHub
     </div>
   </div>
 </body>
 </html>"""
+
+
+def _render_github_section(repos: list[dict]) -> str:
+    """Render the GitHub trending repos section. Returns '' if no repos."""
+    if not repos:
+        return ""
+    color = "#8B5CF6"  # purple accent, distinct from the 3 news categories
+    header = (
+        f'<h2 style="margin:28px 0 10px;padding:6px 12px;border-left:4px solid {color};'
+        f'font-size:16px;color:#111;">GitHub 趋势项目'
+        f' <span style="color:#888;font-weight:400;font-size:13px">({len(repos)})</span></h2>'
+    )
+    cards: list[str] = []
+    for r in repos:
+        name = escape(r.get("full_name") or "")
+        url = escape(r.get("html_url") or "", quote=True)
+        desc_en = escape((r.get("description") or "").strip())
+        desc_zh = escape((r.get("description_zh") or "").strip())
+        stars = r.get("stars") or 0
+        lang = escape(r.get("language") or "")
+        try:
+            stars_str = f"{int(stars):,}"
+        except (TypeError, ValueError):
+            stars_str = str(stars)
+
+        meta_bits = [f'★ {stars_str}']
+        if lang:
+            meta_bits.append(lang)
+        meta = '<span style="margin:0 6px">·</span>'.join(
+            f'<span>{b}</span>' for b in meta_bits
+        )
+
+        zh_html = ""
+        if desc_zh:
+            zh_html = (
+                f'<div style="font-size:12px;color:#666;line-height:1.5;margin-top:3px">'
+                f'<span style="display:inline-block;padding:0 5px;border-radius:3px;'
+                f'background:#FDEEEE;color:#E12726;font-size:10px;font-weight:600;'
+                f'margin-right:6px">译</span>{desc_zh}</div>'
+            )
+
+        cards.append(f"""
+<div style="margin:0 0 14px;padding:12px 14px;border:1px solid #E5E5E5;border-radius:8px;background:#fff">
+  <div style="margin-bottom:4px">
+    <a href="{url}" style="color:#111;text-decoration:none;font-weight:600;font-size:14px;line-height:1.45">{name}</a>
+  </div>
+  <div style="font-size:11px;color:#888;margin-bottom:6px">{meta}</div>
+  {f'<div style="font-size:13px;color:#333;line-height:1.5">{desc_en}</div>' if desc_en else ''}
+  {zh_html}
+  <a href="{url}" style="font-size:11px;color:{color};text-decoration:none;display:inline-block;margin-top:6px">查看仓库 →</a>
+</div>
+""")
+    return header + "\n".join(cards)
+
+
+def _render_insight_section(insight: str | None) -> str:
+    """Render the Lenovo strategic insight box. Returns '' if no insight."""
+    if not insight or not insight.strip():
+        return ""
+    # Convert "• ..." bullet lines into styled rows.
+    rows: list[str] = []
+    for line in insight.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        # Strip a leading bullet marker if present; we render our own.
+        for marker in ("•", "-", "·", "*"):
+            if line.startswith(marker):
+                line = line[len(marker):].strip()
+                break
+        rows.append(
+            f'<div style="display:flex;margin:0 0 8px 0;line-height:1.6">'
+            f'<span style="color:#E12726;margin-right:8px;flex-shrink:0">•</span>'
+            f'<span style="font-size:13px;color:#333">{escape(line)}</span></div>'
+        )
+    body = "\n".join(rows)
+    return f"""
+<div style="margin:28px 0 0 0;padding:16px 18px;background:#FBF4F4;border:1px solid #F3DADA;border-radius:10px">
+  <div style="font-size:15px;font-weight:700;color:#E12726;margin-bottom:10px">对联想集团的启示</div>
+  {body}
+</div>"""
 
 
 def render_digest_text(digest: dict) -> str:
@@ -240,6 +329,29 @@ def render_digest_text(digest: dict) -> str:
             lines.append(f"  {it.get('resolved_url') or it.get('link')}")
             lines.append("")
         lines.append("")
+
+    # GitHub trending repos
+    repos = digest.get("github_repos") or []
+    if repos:
+        lines.append(f"=== GitHub 趋势项目 ({len(repos)}) ===")
+        for r in repos:
+            stars = r.get("stars") or 0
+            lines.append(f"• {r.get('full_name')}  (★ {stars}, {r.get('language') or '—'})")
+            if r.get("description"):
+                lines.append(f"  {r['description']}")
+            if r.get("description_zh"):
+                lines.append(f"  [译] {r['description_zh']}")
+            lines.append(f"  {r.get('html_url')}")
+            lines.append("")
+        lines.append("")
+
+    # Lenovo insight
+    insight = (digest.get("lenovo_insight") or "").strip()
+    if insight:
+        lines.append("=== 对联想集团的启示 ===")
+        lines.append(insight)
+        lines.append("")
+
     return "\n".join(lines)
 
 
