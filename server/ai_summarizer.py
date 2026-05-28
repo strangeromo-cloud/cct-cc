@@ -27,8 +27,10 @@ from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
 logger = logging.getLogger(__name__)
 
 # Timeouts — deliberately generous because this runs once/day in a batch job.
+# gpt-5.x reasoning models are noticeably slower on the big batch calls
+# (classification / dedup over ~50-80 titles), so the LLM timeout is large.
 FETCH_TIMEOUT = 30        # seconds per article HTTP fetch
-LLM_TIMEOUT = 60          # seconds per LLM call
+LLM_TIMEOUT = 150         # seconds per LLM call (reasoning models on big batches)
 MAX_WORKERS = 5           # parallel article fetches + LLM calls
 MAX_ARTICLE_CHARS = 8000  # truncate article text before sending to LLM
 
