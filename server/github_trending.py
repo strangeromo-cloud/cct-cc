@@ -32,7 +32,7 @@ SEARCH_URL = "https://api.github.com/search/repositories"
 _QUERY = "AI OR LLM OR agent OR GPT"
 
 
-def fetch_trending_repos(days: int = 30, limit: int = 5, min_stars: int = 200) -> list[dict]:
+def fetch_trending_repos(days: int = 30, limit: int = 3, min_stars: int = 200) -> list[dict]:
     """
     Return up to `limit` AI repos created within the last `days` days that
     already have at least `min_stars` stars, ranked by total stars desc.
