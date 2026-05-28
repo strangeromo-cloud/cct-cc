@@ -271,32 +271,35 @@ async def api_jobs_ai_news_digest(
         use_ai_dedup=not skip_ai_dedup,
     )
 
-    # GitHub trending repos — cheap Search API call, fetched regardless of
-    # skip_summary so previews still show the section.
-    try:
-        from github_trending import fetch_trending_repos
-        digest["github_repos"] = fetch_trending_repos()
-    except Exception as e:
-        logger.warning(f"GitHub trending failed: {e}")
-        digest["github_repos"] = []
+    # GitHub trending repos — gated behind INCLUDE_GITHUB_TRENDING (default off).
+    from config import INCLUDE_GITHUB_TRENDING, INCLUDE_LENOVO_INSIGHT
+    digest["github_repos"] = []
+    if INCLUDE_GITHUB_TRENDING:
+        try:
+            from github_trending import fetch_trending_repos
+            digest["github_repos"] = fetch_trending_repos()
+        except Exception as e:
+            logger.warning(f"GitHub trending failed: {e}")
 
     if not skip_summary:
         summarize_batch(digest)
 
-        # Translate the GitHub repo descriptions to Chinese (1 batch LLM call).
-        try:
-            from github_trending import translate_repo_descriptions
-            translate_repo_descriptions(digest["github_repos"])
-        except Exception as e:
-            logger.warning(f"GitHub repo translation failed: {e}")
+        if INCLUDE_GITHUB_TRENDING and digest["github_repos"]:
+            # Translate the GitHub repo descriptions to Chinese (1 batch LLM call).
+            try:
+                from github_trending import translate_repo_descriptions
+                translate_repo_descriptions(digest["github_repos"])
+            except Exception as e:
+                logger.warning(f"GitHub repo translation failed: {e}")
 
         # Lenovo strategic insight over everything above (1 LLM call).
-        try:
-            from insight import generate_lenovo_insight
-            digest["lenovo_insight"] = generate_lenovo_insight(digest)
-        except Exception as e:
-            logger.warning(f"Lenovo insight failed: {e}")
-            digest["lenovo_insight"] = None
+        if INCLUDE_LENOVO_INSIGHT:
+            try:
+                from insight import generate_lenovo_insight
+                digest["lenovo_insight"] = generate_lenovo_insight(digest)
+            except Exception as e:
+                logger.warning(f"Lenovo insight failed: {e}")
+                digest["lenovo_insight"] = None
 
     if dry_run:
         return {"dry_run": True, "digest": digest}

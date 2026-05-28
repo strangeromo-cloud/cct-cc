@@ -37,3 +37,16 @@ INCLUDE_AIHOT_FEED = os.getenv("INCLUDE_AIHOT_FEED", "true").strip().lower() not
 # Optional — raises the GitHub Search API rate limit for the trending-repos
 # section. We make 1 request per digest, so anonymous access is usually fine.
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
+
+
+def _flag(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in ("0", "false", "no", "off", "")
+
+
+# Digest add-on sections. Both default OFF (temporarily disabled). Set the env
+# var to "true" / "1" in Zeabur to re-enable without a code change.
+INCLUDE_GITHUB_TRENDING = _flag("INCLUDE_GITHUB_TRENDING", False)
+INCLUDE_LENOVO_INSIGHT = _flag("INCLUDE_LENOVO_INSIGHT", False)
