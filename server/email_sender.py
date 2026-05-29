@@ -158,6 +158,20 @@ def render_digest_html(digest: dict) -> str:
                     )
                 translation_block = "\n".join(parts)
 
+            # Per-item Lenovo insight block — styled like the translation block
+            # but with a red "联想视角" label and a tinted background to set it
+            # apart as analysis rather than reporting.
+            insight_block = ""
+            lenovo_insight = (it.get("lenovo_insight") or "").strip()
+            if lenovo_insight:
+                insight_block = (
+                    '<div style="margin:10px 0 4px 0;padding:10px 12px;background:#FBF4F4;'
+                    'border-left:3px solid #E12726;border-radius:0 6px 6px 0">'
+                    '<div style="font-size:11px;font-weight:700;color:#E12726;margin-bottom:4px">联想视角</div>'
+                    f'<div style="font-size:12px;color:#555;line-height:1.6">{escape(lenovo_insight)}</div>'
+                    '</div>'
+                )
+
             cards.append(f"""
 <div style="margin:0 0 14px;padding:12px 14px;border:1px solid #E5E5E5;border-radius:8px;background:#fff">
   <div style="margin-bottom:6px">
@@ -165,6 +179,7 @@ def render_digest_html(digest: dict) -> str:
   </div>
   {f'<div style="font-size:13px;color:#333;line-height:1.55;margin-bottom:8px">{escape(primary_summary)}</div>' if primary_summary else ''}
   {translation_block}
+  {insight_block}
   <div style="font-size:11px;color:#888;margin:6px 0 6px 0">
     <span>{date}</span>
     <span style="margin:0 6px">·</span>
@@ -181,12 +196,6 @@ def render_digest_html(digest: dict) -> str:
         blocks.append(header + "\n".join(cards))
 
     body_inner = "\n".join(blocks)
-
-    # ── GitHub trending repos section (after news categories) ──────────
-    github_block = _render_github_section(digest.get("github_repos") or [])
-
-    # ── Lenovo insight block (bottom, before footer) ──────────────────
-    insight_block = _render_insight_section(digest.get("lenovo_insight"))
 
     return f"""<!DOCTYPE html>
 <html>
@@ -206,10 +215,8 @@ def render_digest_html(digest: dict) -> str:
       </div>
     </div>
     {body_inner}
-    {github_block}
-    {insight_block}
     <div style="border-top:1px solid #EEE;margin-top:22px;padding-top:12px;font-size:11px;color:#999;text-align:center">
-      CFO Control Tower · Automated digest · 数据源：Google News RSS + AI HOT + GitHub
+      CFO Control Tower · Automated digest · 数据源：Google News RSS + AI HOT
     </div>
   </div>
 </body>
@@ -326,30 +333,11 @@ def render_digest_text(digest: dict) -> str:
                     lines.append(f"  {title_zh}")
                 if summary_zh:
                     lines.append(f"  {summary_zh}")
+            lenovo_insight = (it.get("lenovo_insight") or "").strip()
+            if lenovo_insight:
+                lines.append(f"  [联想视角] {lenovo_insight}")
             lines.append(f"  {it.get('resolved_url') or it.get('link')}")
             lines.append("")
-        lines.append("")
-
-    # GitHub trending repos
-    repos = digest.get("github_repos") or []
-    if repos:
-        lines.append(f"=== GitHub 趋势项目 ({len(repos)}) ===")
-        for r in repos:
-            stars = r.get("stars") or 0
-            lines.append(f"• {r.get('full_name')}  (★ {stars}, {r.get('language') or '—'})")
-            if r.get("description"):
-                lines.append(f"  {r['description']}")
-            if r.get("description_zh"):
-                lines.append(f"  [译] {r['description_zh']}")
-            lines.append(f"  {r.get('html_url')}")
-            lines.append("")
-        lines.append("")
-
-    # Lenovo insight
-    insight = (digest.get("lenovo_insight") or "").strip()
-    if insight:
-        lines.append("=== 对联想集团的启示 ===")
-        lines.append(insight)
         lines.append("")
 
     return "\n".join(lines)
@@ -399,15 +387,21 @@ def send_digest(
 
     html = render_digest_html(digest)
     text = render_digest_text(digest)
+    return _send_email(subject, html, text, smtp_user, smtp_password, recipients,
+                       from_name="AI News Digest", extra={"total": total})
 
+
+def _send_email(subject, html, text, smtp_user, smtp_password, recipients,
+                from_name="AI News Digest", extra=None):
+    """Shared Gmail SMTP send. Returns {sent, recipients, error, **extra}."""
+    extra = extra or {}
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"] = formataddr(("AI News Digest", smtp_user))
+    msg["From"] = formataddr((from_name, smtp_user))
     msg["To"] = ", ".join(recipients)
     msg["Date"] = formatdate(localtime=True)
     msg.attach(MIMEText(text, "plain", "utf-8"))
     msg.attach(MIMEText(html, "html", "utf-8"))
-
     try:
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as server:
             server.ehlo()
@@ -415,8 +409,116 @@ def send_digest(
             server.ehlo()
             server.login(smtp_user, smtp_password)
             server.sendmail(smtp_user, recipients, msg.as_string())
-        logger.info(f"Digest email sent to {recipients} ({total} items)")
-        return {"sent": True, "recipients": recipients, "total": total, "error": None}
+        logger.info(f"Email '{subject}' sent to {recipients}")
+        return {"sent": True, "recipients": recipients, "error": None, **extra}
     except Exception as e:
-        logger.exception(f"Failed to send digest email: {e}")
-        return {"sent": False, "recipients": recipients, "total": total, "error": f"{type(e).__name__}: {e}"}
+        logger.exception(f"Failed to send email: {e}")
+        return {"sent": False, "recipients": recipients, "error": f"{type(e).__name__}: {e}", **extra}
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  GitHub weekly report email
+# ══════════════════════════════════════════════════════════════════════
+
+def render_github_weekly_html(report: dict) -> str:
+    """Render the weekly GitHub trending report as HTML."""
+    repos = report.get("repos", [])
+    week_label = escape(report.get("week_label", ""))
+    generated_at = escape(_fmt_date(report.get("generated_at", datetime.now().isoformat())))
+    color = "#8B5CF6"  # purple
+
+    cards: list[str] = []
+    for i, r in enumerate(repos, start=1):
+        name = escape(r.get("full_name") or "")
+        url = escape(r.get("html_url") or "", quote=True)
+        desc_en = escape((r.get("description") or "").strip())
+        detail_zh = escape((r.get("detail_zh") or r.get("description_zh") or "").strip())
+        lang = escape(r.get("language") or "")
+        try:
+            wk = f"{int(r.get('stars_this_week') or 0):,}"
+            tot = f"{int(r.get('total_stars') or 0):,}"
+        except (TypeError, ValueError):
+            wk, tot = str(r.get("stars_this_week")), str(r.get("total_stars"))
+
+        meta_bits = [f'本周 +{wk}★']
+        if tot and tot != "0":
+            meta_bits.append(f'总计 {tot}★')
+        if lang:
+            meta_bits.append(lang)
+        meta = '<span style="margin:0 6px">·</span>'.join(f'<span>{b}</span>' for b in meta_bits)
+
+        detail_html = ""
+        if detail_zh:
+            detail_html = (
+                f'<div style="font-size:13px;color:#444;line-height:1.65;margin-top:6px">{detail_zh}</div>'
+            )
+
+        cards.append(f"""
+<div style="margin:0 0 16px;padding:14px 16px;border:1px solid #E5E5E5;border-radius:8px;background:#fff">
+  <div style="margin-bottom:4px">
+    <span style="display:inline-block;width:22px;height:22px;line-height:22px;text-align:center;
+      background:{color};color:#fff;border-radius:50%;font-size:12px;font-weight:700;margin-right:8px">{i}</span>
+    <a href="{url}" style="color:#111;text-decoration:none;font-weight:600;font-size:15px;line-height:1.45">{name}</a>
+  </div>
+  <div style="font-size:11px;color:#888;margin:4px 0 6px 30px">{meta}</div>
+  {f'<div style="font-size:12px;color:#777;line-height:1.5;margin:0 0 0 30px;font-style:italic">{desc_en}</div>' if desc_en else ''}
+  <div style="margin-left:30px">{detail_html}</div>
+  <div style="margin:8px 0 0 30px"><a href="{url}" style="font-size:11px;color:{color};text-decoration:none">查看仓库 →</a></div>
+</div>
+""")
+    body = "\n".join(cards) if cards else '<p style="color:#888;font-size:13px">本周暂无符合条件的 AI 项目。</p>'
+
+    return f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>GitHub AI Weekly</title></head>
+<body style="margin:0;padding:20px;background:#F7F7F7;font-family:'Helvetica Neue',Arial,'PingFang SC','Microsoft YaHei',sans-serif;color:#222">
+  <div style="max-width:680px;margin:0 auto;background:#fff;border-radius:10px;padding:22px 24px 30px;box-shadow:0 1px 4px rgba(0,0,0,0.05)">
+    <div style="border-bottom:1px solid #EEE;padding-bottom:14px;margin-bottom:16px">
+      <div style="font-size:20px;font-weight:700;color:#111">
+        GitHub AI 周报
+        <span style="font-size:14px;font-weight:500;color:#666;margin-left:8px">{week_label}</span>
+      </div>
+      <div style="font-size:12px;color:#888;margin-top:4px">
+        本周 star 增长最快的 AI 开源项目 · 生成时间：{generated_at} · 数据源：github.com/trending
+      </div>
+    </div>
+    {body}
+    <div style="border-top:1px solid #EEE;margin-top:22px;padding-top:12px;font-size:11px;color:#999;text-align:center">
+      CFO Control Tower · Weekly GitHub digest · 排序依据：本周新增 star 数
+    </div>
+  </div>
+</body>
+</html>"""
+
+
+def render_github_weekly_text(report: dict) -> str:
+    """Plain-text fallback for the weekly GitHub report."""
+    repos = report.get("repos", [])
+    lines = [f"GitHub AI 周报 ({report.get('week_label', '')})", ""]
+    for i, r in enumerate(repos, start=1):
+        wk = r.get("stars_this_week") or 0
+        tot = r.get("total_stars") or 0
+        lines.append(f"{i}. {r.get('full_name')}  (本周 +{wk}★, 总计 {tot}★, {r.get('language') or '—'})")
+        if r.get("description"):
+            lines.append(f"   {r['description']}")
+        if r.get("detail_zh"):
+            lines.append(f"   {r['detail_zh']}")
+        lines.append(f"   {r.get('html_url')}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def send_github_weekly(report: dict, smtp_user: str, smtp_password: str, recipient: str) -> dict:
+    """Compose + send the weekly GitHub report via Gmail SMTP."""
+    if not smtp_user or not smtp_password:
+        return {"sent": False, "recipients": [], "error": "SMTP not configured"}
+    recipients = _parse_recipients(recipient)
+    if not recipients:
+        return {"sent": False, "recipients": [], "error": "DIGEST_RECIPIENT not configured"}
+
+    n = len(report.get("repos", []))
+    subject = f"[GitHub AI 周报] {report.get('week_label', '')} · Top {n}"
+    html = render_github_weekly_html(report)
+    text = render_github_weekly_text(report)
+    return _send_email(subject, html, text, smtp_user, smtp_password, recipients,
+                       from_name="GitHub AI Weekly", extra={"count": n})

@@ -271,35 +271,21 @@ async def api_jobs_ai_news_digest(
         use_ai_dedup=not skip_ai_dedup,
     )
 
-    # GitHub trending repos — gated behind INCLUDE_GITHUB_TRENDING (default off).
-    from config import INCLUDE_GITHUB_TRENDING, INCLUDE_LENOVO_INSIGHT
-    digest["github_repos"] = []
-    if INCLUDE_GITHUB_TRENDING:
-        try:
-            from github_trending import fetch_trending_repos
-            digest["github_repos"] = fetch_trending_repos()
-        except Exception as e:
-            logger.warning(f"GitHub trending failed: {e}")
+    from config import INCLUDE_LENOVO_INSIGHT
 
     if not skip_summary:
         summarize_batch(digest)
 
-        if INCLUDE_GITHUB_TRENDING and digest["github_repos"]:
-            # Translate the GitHub repo descriptions to Chinese (1 batch LLM call).
-            try:
-                from github_trending import translate_repo_descriptions
-                translate_repo_descriptions(digest["github_repos"])
-            except Exception as e:
-                logger.warning(f"GitHub repo translation failed: {e}")
-
-        # Lenovo strategic insight over everything above (1 LLM call).
+        # Per-item Lenovo insight — one batch LLM call attaches a detailed
+        # analysis paragraph under each news item. (GitHub trending now lives
+        # in the separate weekly report; see POST /api/jobs/github-weekly.)
         if INCLUDE_LENOVO_INSIGHT:
             try:
-                from insight import generate_lenovo_insight
-                digest["lenovo_insight"] = generate_lenovo_insight(digest)
+                from insight import generate_per_item_insights
+                digest["insight_stats"] = generate_per_item_insights(digest)
             except Exception as e:
-                logger.warning(f"Lenovo insight failed: {e}")
-                digest["lenovo_insight"] = None
+                logger.warning(f"Per-item Lenovo insight failed: {e}")
+                digest["insight_stats"] = {"used": False, "error": str(e)}
 
     if dry_run:
         return {"dry_run": True, "digest": digest}
@@ -321,6 +307,47 @@ async def api_jobs_ai_news_digest(
         "summary_stats": digest.get("summary_stats"),
         "email": result,
         "counts_by_category": {k: len(v) for k, v in digest.get("by_category", {}).items()},
+    }
+
+
+@app.post("/api/jobs/github-weekly")
+async def api_jobs_github_weekly(
+    authorization: str | None = Header(default=None),
+    limit: int = Query(5, ge=1, le=15, description="How many top repos to include"),
+    dry_run: bool = Query(False, description="Build + return the report, do not email"),
+    skip_enrich: bool = Query(False, description="Skip README fetch + LLM detail (faster preview)"),
+):
+    """
+    Weekly GitHub AI trending report.
+
+    Scrapes github.com/trending?since=weekly (ranked by stars gained this week
+    — the real velocity metric), keeps AI-relevant repos, and for each fetches
+    a README excerpt + generates a detailed Chinese intro. Sends a standalone
+    weekly email (separate from the daily digest).
+
+    Invoked by .github/workflows/weekly-github.yml (Mondays 08:30 Beijing).
+    """
+    _require_job_token(authorization)
+
+    from github_weekly import build_weekly_report
+    from email_sender import send_github_weekly
+
+    report = build_weekly_report(limit=limit, enrich=not skip_enrich)
+
+    if dry_run:
+        return {"dry_run": True, "report": report}
+
+    result = send_github_weekly(
+        report=report,
+        smtp_user=SMTP_USER,
+        smtp_password=SMTP_PASSWORD,
+        recipient=DIGEST_RECIPIENT,
+    )
+    return {
+        "dry_run": False,
+        "week_label": report.get("week_label"),
+        "repo_count": len(report.get("repos", [])),
+        "email": result,
     }
 
 

@@ -46,7 +46,6 @@ def _flag(name: str, default: bool) -> bool:
     return raw.strip().lower() not in ("0", "false", "no", "off", "")
 
 
-# Digest add-on sections. Both default OFF (temporarily disabled). Set the env
-# var to "true" / "1" in Zeabur to re-enable without a code change.
-INCLUDE_GITHUB_TRENDING = _flag("INCLUDE_GITHUB_TRENDING", False)
-INCLUDE_LENOVO_INSIGHT = _flag("INCLUDE_LENOVO_INSIGHT", False)
+# Per-item Lenovo insight in the daily digest (one analysis paragraph under
+# each news item). Default ON. Set to "false" to disable without a code change.
+INCLUDE_LENOVO_INSIGHT = _flag("INCLUDE_LENOVO_INSIGHT", True)

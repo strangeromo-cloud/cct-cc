@@ -1,0 +1,45 @@
+name: Weekly GitHub AI Report
+
+on:
+  schedule:
+    # 00:30 UTC Monday = 08:30 Monday Beijing time. May be delayed 5–15 min.
+    - cron: '30 0 * * 1'
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 'How many top repos (1-15)'
+        required: false
+        default: '5'
+      dry_run:
+        description: 'Preview only — do not send the email'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
+
+jobs:
+  send-weekly:
+    runs-on: ubuntu-latest
+    # README fetches + LLM detail generation for several repos; allow headroom.
+    timeout-minutes: 15
+    steps:
+      - name: Trigger backend weekly GitHub endpoint
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+          JOB_TOKEN:   ${{ secrets.JOB_TOKEN }}
+          LIMIT:       ${{ github.event.inputs.limit || '5' }}
+          DRY_RUN:     ${{ github.event.inputs.dry_run || 'false' }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BACKEND_URL:-}" ] || [ -z "${JOB_TOKEN:-}" ]; then
+            echo "::error::Missing BACKEND_URL or JOB_TOKEN secret"
+            exit 1
+          fi
+          URL="${BACKEND_URL%/}/api/jobs/github-weekly?limit=${LIMIT}&dry_run=${DRY_RUN}"
+          echo "POST $URL"
+          curl --fail-with-body -sS --max-time 600 -X POST \
+            -H "Authorization: Bearer ${JOB_TOKEN}" \
+            -H "Content-Type: application/json" \
+            "$URL" | tee response.json
+          echo
+          echo "Done."

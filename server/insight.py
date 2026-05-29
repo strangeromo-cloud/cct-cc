@@ -1,74 +1,104 @@
 """
-Lenovo Group strategic insight.
+Lenovo Group strategic insight — per news item.
 
-Synthesizes the day's selected AI news + GitHub trending repos into a short
-"what this means for Lenovo" briefing, framed around the three business
-groups (IDG / ISG / SSG). Appended at the bottom of the digest email.
+For each selected news item, generate a detailed Chinese paragraph on what it
+means for Lenovo, framed around the three business groups (IDG / ISG / SSG).
+Rendered beneath each item in the digest email (styled like the translation
+block).
+
+One batch LLM call covers all items.
 """
 from __future__ import annotations
 
+import json
 import logging
 
 logger = logging.getLogger(__name__)
 
-_INSIGHT_PROMPT = """你是联想集团的 CFO 战略分析师。下面是今天的 AI 行业动态（精选新闻 + GitHub 热门新项目）。
+_PER_ITEM_PROMPT = """你是联想集团的 CFO 战略分析师。下面是今天精选的若干条 AI 行业新闻（已编号）。
 
-请基于这些内容，总结**对联想集团的启示**。要求：
+请为**每一条**新闻单独写一段「对联想集团的影响分析」。要求：
 
-- 输出 3-4 条要点，每条 1-2 句话
-- 紧扣联想三大业务集团：
-    · IDG（智能设备集团：PC、平板、手机、AI 终端）
+- 每条 2-4 句，是一段连贯的分析（不是要点罗列）
+- 必须落到联想三大业务集团中最相关的那一个：
+    · IDG（智能设备集团：PC、平板、手机、AI 终端、工作站）
     · ISG（基础设施方案集团：服务器、存储、算力、数据中心）
-    · SSG（方案服务集团：企业 IT 服务、解决方案、订阅）
-- 每条点明这是**机会**还是**风险**，并简述原因
-- 严格基于上面给的内容，**不要编造**任何数字或未提及的事实
-- 不说空话套话（如「值得关注」「具有重要意义」）
-- 纯中文输出，不要 JSON、不要标题、不要 markdown 符号
-- 每条要点用「• 」开头，要点之间换行
+    · SSG（方案服务集团：企业 IT 服务、解决方案、订阅运营）
+- 明确点出这是**机会**还是**风险**，并简述传导逻辑（为什么会影响到该业务）
+- 给出一句可落地的建议方向
+- 严格基于该条新闻内容本身，**不要编造**数字或未提及的事实
+- 纯中文，不说空话套话（如「值得关注」「具有重要意义」）
+- 每条之间相互独立，不要互相引用
 
-今日动态：
-{content}
+严格返回 JSON，结构如下，不要任何其他文字：
+{{"insights": [{{"id": 1, "text": "针对第1条的分析"}}, {{"id": 2, "text": "针对第2条的分析"}}]}}
+
+新闻列表：
+{news_list}
 """
 
 
-def _assemble_content(digest: dict) -> str:
-    """Flatten the digest's news + repos into a compact bullet list for the LLM."""
-    from ai_news import CATEGORY_ORDER  # local import avoids any cycle at import time
-
-    label = {
-        "model_product": "模型/产品",
-        "business": "商业应用",
-        "policy_risk": "政策/风险",
-    }
-    lines: list[str] = []
+def _collect_items(digest: dict) -> list[dict]:
+    """Flatten selected items across categories into one ordered list."""
+    from ai_news import CATEGORY_ORDER
+    items: list[dict] = []
     by_cat = digest.get("by_category", {})
     for cat in CATEGORY_ORDER:
-        for it in by_cat.get(cat, []):
-            title = (it.get("title_zh") or it.get("title") or "").strip()
-            summ = (it.get("summary") or "").strip()
-            lines.append(f"- [{label.get(cat, cat)}] {title}：{summ}")
-
-    for r in digest.get("github_repos", []):
-        desc = (r.get("description_zh") or r.get("description") or "").strip()
-        lines.append(f"- [GitHub] {r.get('full_name')}（{r.get('stars')}★）：{desc}")
-
-    return "\n".join(lines)
+        items.extend(by_cat.get(cat, []))
+    return items
 
 
-def generate_lenovo_insight(digest: dict) -> str | None:
+def generate_per_item_insights(digest: dict) -> dict:
     """
-    Produce a Chinese strategic insight string (bullet points) or None on
-    failure / empty input.
+    Attach a `lenovo_insight` string to each selected news item (in place).
+
+    Returns a small stats dict: {used, total, filled, error}.
+    On failure, items simply have no `lenovo_insight` and the email omits the
+    block — the digest still ships.
     """
-    content = _assemble_content(digest)
-    if not content.strip():
-        return None
+    stats = {"used": False, "total": 0, "filled": 0, "error": None}
+    items = _collect_items(digest)
+    stats["total"] = len(items)
+    if not items:
+        return stats
+
+    # Build a numbered list using the most informative title + summary we have.
+    lines: list[str] = []
+    for i, it in enumerate(items, start=1):
+        title = (it.get("title_zh") or it.get("title") or "").strip()
+        summ = (it.get("summary") or "").strip()
+        lines.append(f"{i}. {title}\n   摘要：{summ}")
+    news_list = "\n".join(lines)
 
     from ai_summarizer import _call_llm
-
-    prompt = _INSIGHT_PROMPT.format(content=content)
-    # Generous budget — reasoning tokens + a multi-bullet Chinese briefing.
-    out = _call_llm(prompt, max_out=3000)
+    out = _call_llm(_PER_ITEM_PROMPT.format(news_list=news_list), max_out=8000, json_mode=True)
     if not out:
-        return None
-    return out.strip()
+        stats["error"] = "LLM returned empty"
+        return stats
+
+    try:
+        data = json.loads(out)
+    except (json.JSONDecodeError, ValueError):
+        stats["error"] = "non-JSON response"
+        return stats
+
+    by_id: dict[int, str] = {}
+    for entry in data.get("insights", []):
+        if not isinstance(entry, dict):
+            continue
+        try:
+            idx = int(entry.get("id"))
+        except (TypeError, ValueError):
+            continue
+        text = (entry.get("text") or "").strip()
+        if text:
+            by_id[idx] = text
+
+    for i, it in enumerate(items, start=1):
+        if i in by_id:
+            it["lenovo_insight"] = by_id[i]
+            stats["filled"] += 1
+
+    stats["used"] = True
+    logger.info(f"per-item insights: {stats['filled']}/{stats['total']} filled")
+    return stats
