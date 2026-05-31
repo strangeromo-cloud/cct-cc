@@ -47,5 +47,6 @@ def _flag(name: str, default: bool) -> bool:
 
 
 # Per-item Lenovo insight in the daily digest (one analysis paragraph under
-# each news item). Default ON. Set to "false" to disable without a code change.
-INCLUDE_LENOVO_INSIGHT = _flag("INCLUDE_LENOVO_INSIGHT", True)
+# each news item). Temporarily OFF. Set INCLUDE_LENOVO_INSIGHT=true in Zeabur
+# to re-enable without a code change.
+INCLUDE_LENOVO_INSIGHT = _flag("INCLUDE_LENOVO_INSIGHT", False)
