@@ -358,15 +358,18 @@ def send_digest(
     smtp_password: str,
     recipient: str,
     subject_prefix: str = "[AI News Digest]",
+    from_name: str = "AI News Digest",
 ) -> dict:
     """
     Compose + send the digest email via Gmail SMTP.
 
     `recipient` may be a single address or a comma-separated list.
     All recipients get the same email in one "To:" line (not BCC).
+    `from_name` is the sender display name — vary it per edition so Outlook's
+    message list doesn't show the same sender for the plain vs insight emails.
 
     Returns:
-        { "sent": bool, "recipients": [str], "total": int, "error": str | None }
+        { "sent": bool, "recipients": [str], "total": int, "subject": str, "error": str | None }
     """
     if not smtp_user or not smtp_password:
         return {"sent": False, "recipients": [], "total": 0,
@@ -388,7 +391,7 @@ def send_digest(
     html = render_digest_html(digest)
     text = render_digest_text(digest)
     return _send_email(subject, html, text, smtp_user, smtp_password, recipients,
-                       from_name="AI News Digest", extra={"total": total})
+                       from_name=from_name, extra={"total": total, "subject": subject})
 
 
 def _send_email(subject, html, text, smtp_user, smtp_password, recipients,

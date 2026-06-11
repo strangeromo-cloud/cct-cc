@@ -295,15 +295,19 @@ async def api_jobs_ai_news_digest(
     if dry_run:
         return {"dry_run": True, "digest": digest}
 
-    # Distinct subject so the insight edition doesn't collapse into the same
-    # Gmail thread as the plain digest.
-    subject_prefix = "[AI News · 联想视角]" if with_insight else "[AI News Digest]"
+    # Distinct subject AND sender name so the insight edition doesn't look
+    # identical to the plain digest in Outlook's list / conversation view.
+    if with_insight:
+        subject_prefix, from_name = "[AI News · 联想视角]", "AI News · 联想视角"
+    else:
+        subject_prefix, from_name = "[AI News Digest]", "AI News Digest"
     result = send_digest(
         digest=digest,
         smtp_user=SMTP_USER,
         smtp_password=SMTP_PASSWORD,
         recipient=DIGEST_RECIPIENT,
         subject_prefix=subject_prefix,
+        from_name=from_name,
     )
     return {
         "dry_run": False,
