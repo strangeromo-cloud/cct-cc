@@ -40,16 +40,18 @@ while [[ $# -gt 0 ]]; do
     --dry-run)      DRY_RUN=true; shift ;;
     --hours)        HOURS="${2:?--hours needs a number}"; shift 2 ;;
     --skip-summary) QS_EXTRA="${QS_EXTRA}&skip_summary=true"; shift ;;
+    --with-insight) QS_EXTRA="${QS_EXTRA}&with_insight=true"; shift ;;
     -h|--help)
       cat <<'USAGE'
 Manually trigger the daily AI news digest email.
 
 Usage:
-  ./send-digest.sh                 fetch + summarize + SEND the email
+  ./send-digest.sh                 fetch + summarize + SEND the plain digest
+  ./send-digest.sh --with-insight  SEND a separate edition with per-item 联想视角
   ./send-digest.sh --dry-run       build + print the digest, do NOT send
   ./send-digest.sh --hours 48      widen lookback window (default 24)
   ./send-digest.sh --skip-summary  fast preview: skip LLM summaries
-  ./send-digest.sh --dry-run --skip-summary
+  ./send-digest.sh --dry-run --with-insight
 
 Credentials:
   JOB_TOKEN / BACKEND_URL from env, else server/.env, else default URL.

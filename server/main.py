@@ -243,6 +243,7 @@ async def api_jobs_ai_news_digest(
     skip_summary: bool = Query(False, description="Skip LLM summarization (faster preview)"),
     skip_ai_classifier: bool = Query(False, description="Skip LLM re-classification, use raw query tags"),
     skip_ai_dedup: bool = Query(False, description="Skip LLM cluster dedup (keeps near-duplicates)"),
+    with_insight: bool = Query(False, description="Force per-item Lenovo insight + tag as a distinct email"),
 ):
     """
     Produce + send the daily AI news digest.
@@ -273,13 +274,17 @@ async def api_jobs_ai_news_digest(
 
     from config import INCLUDE_LENOVO_INSIGHT
 
+    # `with_insight=true` forces insight on regardless of the env flag, and
+    # marks this as the separate "AI 新闻 + 联想视角" email.
+    want_insight = with_insight or INCLUDE_LENOVO_INSIGHT
+
     if not skip_summary:
         summarize_batch(digest)
 
         # Per-item Lenovo insight — one batch LLM call attaches a detailed
         # analysis paragraph under each news item. (GitHub trending now lives
         # in the separate weekly report; see POST /api/jobs/github-weekly.)
-        if INCLUDE_LENOVO_INSIGHT:
+        if want_insight:
             try:
                 from insight import generate_per_item_insights
                 digest["insight_stats"] = generate_per_item_insights(digest)
@@ -290,11 +295,15 @@ async def api_jobs_ai_news_digest(
     if dry_run:
         return {"dry_run": True, "digest": digest}
 
+    # Distinct subject so the insight edition doesn't collapse into the same
+    # Gmail thread as the plain digest.
+    subject_prefix = "[AI News · 联想视角]" if with_insight else "[AI News Digest]"
     result = send_digest(
         digest=digest,
         smtp_user=SMTP_USER,
         smtp_password=SMTP_PASSWORD,
         recipient=DIGEST_RECIPIENT,
+        subject_prefix=subject_prefix,
     )
     return {
         "dry_run": False,
