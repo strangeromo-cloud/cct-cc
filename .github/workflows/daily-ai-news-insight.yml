@@ -1,0 +1,46 @@
+name: Daily AI News Digest (联想视角)
+
+on:
+  schedule:
+    # 00:35 UTC = 08:35 Beijing — 5 min after the plain digest so two heavy
+    # LLM runs don't hit the backend simultaneously. GitHub may delay 5–15 min.
+    - cron: '35 0 * * *'
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: 'Time window in hours (1–168).'
+        required: false
+        default: '24'
+      dry_run:
+        description: 'Preview only — do not send the email'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
+
+jobs:
+  send-insight-digest:
+    runs-on: ubuntu-latest
+    # Summaries + per-item Lenovo insight = extra LLM calls; allow headroom.
+    timeout-minutes: 15
+    steps:
+      - name: Trigger backend digest endpoint (with_insight)
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+          JOB_TOKEN:   ${{ secrets.JOB_TOKEN }}
+          HOURS:       ${{ github.event.inputs.hours || '24' }}
+          DRY_RUN:     ${{ github.event.inputs.dry_run || 'false' }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BACKEND_URL:-}" ] || [ -z "${JOB_TOKEN:-}" ]; then
+            echo "::error::Missing BACKEND_URL or JOB_TOKEN secret"
+            exit 1
+          fi
+          URL="${BACKEND_URL%/}/api/jobs/ai-news-digest?hours=${HOURS}&dry_run=${DRY_RUN}&with_insight=true"
+          echo "POST $URL"
+          curl --fail-with-body -sS --max-time 600 -X POST \
+            -H "Authorization: Bearer ${JOB_TOKEN}" \
+            -H "Content-Type: application/json" \
+            "$URL" | tee response.json
+          echo
+          echo "Done."
