@@ -292,6 +292,10 @@ async def api_jobs_ai_news_digest(
                 logger.warning(f"Per-item Lenovo insight failed: {e}")
                 digest["insight_stats"] = {"used": False, "error": str(e)}
 
+    # Mark the insight edition so the email body title shows a 【联想视角】 badge.
+    if with_insight:
+        digest["edition_badge"] = "联想视角"
+
     if dry_run:
         return {"dry_run": True, "digest": digest}
 

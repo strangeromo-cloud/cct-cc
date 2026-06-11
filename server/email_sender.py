@@ -75,6 +75,15 @@ def render_digest_html(digest: dict) -> str:
     weekday_cn = "一二三四五六日"[now_bj.weekday()]
     title_date = f"{now_bj.strftime('%Y-%m-%d')} · 周{weekday_cn}"
 
+    # Optional edition badge next to the body title (e.g. "联想视角" edition).
+    edition_badge = (digest.get("edition_badge") or "").strip()
+    badge_html = (
+        f'<span style="display:inline-block;margin-left:10px;padding:2px 8px;border-radius:4px;'
+        f'background:#E12726;color:#fff;font-size:12px;font-weight:600;vertical-align:middle">'
+        f'【{escape(edition_badge)}】</span>'
+        if edition_badge else ''
+    )
+
     blocks: list[str] = []
     for cat in CATEGORY_ORDER:
         items = by_category.get(cat, [])
@@ -207,7 +216,7 @@ def render_digest_html(digest: dict) -> str:
   <div style="max-width:680px;margin:0 auto;background:#fff;border-radius:10px;padding:22px 24px 30px;box-shadow:0 1px 4px rgba(0,0,0,0.05)">
     <div style="border-bottom:1px solid #EEE;padding-bottom:14px;margin-bottom:10px">
       <div style="font-size:20px;font-weight:700;color:#111">
-        Daily AI News Digest
+        Daily AI News Digest{badge_html}
         <span style="font-size:14px;font-weight:500;color:#666;margin-left:8px">{title_date}</span>
       </div>
       <div style="font-size:12px;color:#888;margin-top:4px">
