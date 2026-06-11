@@ -1,0 +1,17 @@
+# Keep secrets and local junk out of the image build context.
+# (On Git-based Zeabur deploys .env isn't in the repo anyway; this is a
+#  belt-and-suspenders guard so secrets never get baked into an image layer.)
+.env
+.env.*
+!.env.example
+
+# Python caches / virtualenvs
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+venv/
+.venv/
+
+# OS / editor cruft
+.DS_Store
