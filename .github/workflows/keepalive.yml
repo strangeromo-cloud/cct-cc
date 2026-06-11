@@ -1,0 +1,39 @@
+name: Keepalive
+
+# Prevents GitHub from auto-disabling the scheduled digest/weekly workflows
+# after 60 days of repository inactivity. Runs monthly and commits a tiny
+# timestamp change to the root .keepalive file — a real repo activity that
+# resets the 60-day timer. The file is outside server/, so Zeabur (which
+# watches the server/ directory) does NOT rebuild the backend for it.
+
+on:
+  schedule:
+    # 1st of every month, 08:00 UTC. ~30-day cadence = 2x safety margin
+    # under the 60-day limit.
+    - cron: '0 8 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Touch .keepalive and commit
+        run: |
+          set -euo pipefail
+          STAMP="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          sed -i "s/^last-keepalive: .*/last-keepalive: ${STAMP}/" .keepalive
+          if git diff --quiet; then
+            echo "No change — nothing to commit."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .keepalive
+          git commit -m "chore: keepalive ${STAMP}"
+          git push
+          echo "Keepalive commit pushed."

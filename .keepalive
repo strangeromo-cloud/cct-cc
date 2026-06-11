@@ -1,0 +1,6 @@
+Touched periodically by .github/workflows/keepalive.yml to keep scheduled
+workflows from being auto-disabled after 60 days of repo inactivity.
+This file lives at the repo root (outside server/) so updating it does NOT
+trigger a backend rebuild on Zeabur.
+
+last-keepalive: initial
