@@ -2,8 +2,9 @@ name: Weekly GitHub AI Report
 
 on:
   schedule:
-    # 00:30 UTC Monday = 08:30 Monday Beijing time. May be delayed 5–15 min.
-    - cron: '30 0 * * 1'
+    # 23:18 UTC Sunday = 07:18 Monday Beijing. Early + off-peak odd minute to
+    # absorb GitHub's scheduler delay so it still lands ~Monday morning.
+    - cron: '18 23 * * 0'
   workflow_dispatch:
     inputs:
       limit:

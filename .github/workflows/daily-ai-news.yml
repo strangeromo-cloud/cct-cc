@@ -2,8 +2,11 @@ name: Daily AI News Digest
 
 on:
   schedule:
-    # 00:30 UTC = 08:30 Beijing time. GitHub may delay by 5–15 min during peak load.
-    - cron: '30 0 * * *'
+    # 23:13 UTC = 07:13 Beijing (next day). Set early + off-peak odd minute:
+    # GitHub only delays (never fires early) and popular :00/:30 UTC slots are
+    # heavily backlogged, so an early odd-minute time absorbs the typical
+    # 1–2h scheduler delay and still lands around 08:30 Beijing.
+    - cron: '13 23 * * *'
   workflow_dispatch:
     inputs:
       hours:

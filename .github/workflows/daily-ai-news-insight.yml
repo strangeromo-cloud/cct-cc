@@ -2,9 +2,10 @@ name: Daily AI News Digest (联想视角)
 
 on:
   schedule:
-    # 00:35 UTC = 08:35 Beijing — 5 min after the plain digest so two heavy
-    # LLM runs don't hit the backend simultaneously. GitHub may delay 5–15 min.
-    - cron: '35 0 * * *'
+    # 23:18 UTC = 07:18 Beijing (next day). Early + off-peak odd minute to
+    # absorb GitHub's scheduler delay; 5 min after the plain digest so two
+    # heavy LLM runs don't hit the backend simultaneously.
+    - cron: '18 23 * * *'
   workflow_dispatch:
     inputs:
       hours:
