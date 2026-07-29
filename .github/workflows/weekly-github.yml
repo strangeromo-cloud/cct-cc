@@ -44,3 +44,15 @@ jobs:
             "$URL" | tee response.json
           echo
           echo "Done."
+
+      - name: Notify Lark on failure
+        if: failure()
+        env:
+          LARK_WEBHOOK: ${{ secrets.LARK_WEBHOOK }}
+        run: |
+          set -euo pipefail
+          [ -n "${LARK_WEBHOOK:-}" ] || { echo "No LARK_WEBHOOK secret; skipping alert."; exit 0; }
+          TEXT="🔴 ${GITHUB_WORKFLOW} 执行失败\n仓库: ${GITHUB_REPOSITORY}\n查看: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\n请检查后端服务是否正常。"
+          curl -sS -X POST "$LARK_WEBHOOK" \
+            -H 'Content-Type: application/json' \
+            -d "$(printf '{"msg_type":"text","content":{"text":"%s"}}' "$TEXT")" || true

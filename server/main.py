@@ -4,6 +4,7 @@ Serves dashboard data + AI chat with LLM integration.
 """
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -244,6 +245,7 @@ async def api_jobs_ai_news_digest(
     skip_ai_classifier: bool = Query(False, description="Skip LLM re-classification, use raw query tags"),
     skip_ai_dedup: bool = Query(False, description="Skip LLM cluster dedup (keeps near-duplicates)"),
     with_insight: bool = Query(False, description="Force per-item Lenovo insight + tag as a distinct email"),
+    skip_lark: bool = Query(False, description="Do not post to Lark even if LARK_WEBHOOK is set"),
 ):
     """
     Produce + send the daily AI news digest.
@@ -313,6 +315,24 @@ async def api_jobs_ai_news_digest(
         subject_prefix=subject_prefix,
         from_name=from_name,
     )
+
+    # Also post to Lark when a webhook is configured. Never let a Lark failure
+    # affect the email result — the email is the primary channel.
+    lark_result = {"sent": False, "error": "LARK_WEBHOOK not configured"}
+    try:
+        from config import LARK_WEBHOOK
+        if LARK_WEBHOOK and not skip_lark:
+            from lark_client import send_digest_to_lark
+            now_bj = datetime.now(timezone(timedelta(hours=8)))
+            card_title = (
+                f"AI 日报 · 联想视角 {now_bj.strftime('%m-%d')}" if with_insight
+                else f"AI 日报 {now_bj.strftime('%m-%d')}"
+            )
+            lark_result = send_digest_to_lark(LARK_WEBHOOK, digest, card_title)
+    except Exception as e:
+        logger.warning(f"Lark posting failed: {e}")
+        lark_result = {"sent": False, "error": f"{type(e).__name__}: {e}"}
+
     return {
         "dry_run": False,
         "total": digest.get("total", 0),
@@ -322,6 +342,7 @@ async def api_jobs_ai_news_digest(
         "classifier_stats": digest.get("classifier_stats"),
         "dedup_stats": digest.get("dedup_stats"),
         "summary_stats": digest.get("summary_stats"),
+        "lark": lark_result,
         "email": result,
         "counts_by_category": {k: len(v) for k, v in digest.get("by_category", {}).items()},
     }

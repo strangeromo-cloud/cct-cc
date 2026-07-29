@@ -38,6 +38,10 @@ INCLUDE_AIHOT_FEED = os.getenv("INCLUDE_AIHOT_FEED", "true").strip().lower() not
 # section. We make 1 request per digest, so anonymous access is usually fine.
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 
+# Lark / Feishu custom-bot webhook. When set, the digest is also posted to
+# that group chat as an interactive card. Empty = Lark posting disabled.
+LARK_WEBHOOK = os.getenv("LARK_WEBHOOK", "")
+
 
 def _flag(name: str, default: bool) -> bool:
     raw = os.getenv(name)
