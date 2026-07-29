@@ -41,6 +41,8 @@ while [[ $# -gt 0 ]]; do
     --hours)        HOURS="${2:?--hours needs a number}"; shift 2 ;;
     --skip-summary) QS_EXTRA="${QS_EXTRA}&skip_summary=true"; shift ;;
     --with-insight) QS_EXTRA="${QS_EXTRA}&with_insight=true"; shift ;;
+    --no-email)     QS_EXTRA="${QS_EXTRA}&no_email=true"; shift ;;
+    --skip-lark)    QS_EXTRA="${QS_EXTRA}&skip_lark=true"; shift ;;
     -h|--help)
       cat <<'USAGE'
 Manually trigger the daily AI news digest email.
@@ -51,6 +53,8 @@ Usage:
   ./send-digest.sh --dry-run       build + print the digest, do NOT send
   ./send-digest.sh --hours 48      widen lookback window (default 24)
   ./send-digest.sh --skip-summary  fast preview: skip LLM summaries
+  ./send-digest.sh --no-email      push to Lark only, send NO email
+  ./send-digest.sh --skip-lark     send email only, do NOT post to Lark
   ./send-digest.sh --dry-run --with-insight
 
 Credentials:

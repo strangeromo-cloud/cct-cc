@@ -246,6 +246,7 @@ async def api_jobs_ai_news_digest(
     skip_ai_dedup: bool = Query(False, description="Skip LLM cluster dedup (keeps near-duplicates)"),
     with_insight: bool = Query(False, description="Force per-item Lenovo insight + tag as a distinct email"),
     skip_lark: bool = Query(False, description="Do not post to Lark even if LARK_WEBHOOK is set"),
+    no_email: bool = Query(False, description="Skip the email send — useful for Lark-only testing"),
 ):
     """
     Produce + send the daily AI news digest.
@@ -307,14 +308,19 @@ async def api_jobs_ai_news_digest(
         subject_prefix, from_name = "[AI News · 联想视角]", "AI News · 联想视角"
     else:
         subject_prefix, from_name = "[AI News Digest]", "AI News Digest"
-    result = send_digest(
-        digest=digest,
-        smtp_user=SMTP_USER,
-        smtp_password=SMTP_PASSWORD,
-        recipient=DIGEST_RECIPIENT,
-        subject_prefix=subject_prefix,
-        from_name=from_name,
-    )
+
+    if no_email:
+        # Lark-only test run: build everything, push to Lark, send no mail.
+        result = {"sent": False, "recipients": [], "error": None, "skipped": "no_email=true"}
+    else:
+        result = send_digest(
+            digest=digest,
+            smtp_user=SMTP_USER,
+            smtp_password=SMTP_PASSWORD,
+            recipient=DIGEST_RECIPIENT,
+            subject_prefix=subject_prefix,
+            from_name=from_name,
+        )
 
     # Also post to Lark when a webhook is configured. Never let a Lark failure
     # affect the email result — the email is the primary channel.
