@@ -227,6 +227,67 @@ async def api_global_summary_stream(req: GlobalSummaryRequest):
 
 
 # ── Scheduled Jobs ────────────────────────────────────────────────────
+def _alert_lark_on_degraded(digest: dict, with_insight: bool = False) -> dict | None:
+    """
+    Post a Lark alert when the digest ran in a degraded state.
+
+    The pipeline is designed to always ship an email — if the LLM is
+    unreachable it falls back to raw RSS text. That silent degradation is the
+    failure mode worth alerting on: mail still arrives, but with no Chinese
+    translation, no summaries and no AI classification.
+
+    Alerts when ALL of these LLM stages produced nothing:
+      * summaries      (summary_stats.llm == 0 while items exist)
+      * classification (classifier_stats.used is False)
+      * dedup          (dedup_stats.used is False)
+    """
+    from config import LARK_WEBHOOK
+    if not LARK_WEBHOOK:
+        return None
+
+    total = digest.get("total", 0)
+    if not total:
+        return None
+
+    summary_stats = digest.get("summary_stats") or {}
+    classifier_stats = digest.get("classifier_stats") or {}
+    dedup_stats = digest.get("dedup_stats") or {}
+
+    llm_summaries = summary_stats.get("llm", 0)
+    classifier_ok = bool(classifier_stats.get("used"))
+    dedup_ok = bool(dedup_stats.get("used"))
+
+    problems: list[str] = []
+    if llm_summaries == 0:
+        problems.append(f"摘要/翻译全部失败（{total} 条均未生成）")
+    if not classifier_ok:
+        err = classifier_stats.get("error") or "未知原因"
+        problems.append(f"AI 分类未生效（{err}）")
+    if not dedup_ok:
+        err = dedup_stats.get("error") or "未知原因"
+        problems.append(f"AI 去重未生效（{err}）")
+
+    # Only alert on wholesale failure — a single stage degrading is tolerable
+    # and would otherwise create alert fatigue.
+    if llm_summaries > 0 or len(problems) < 2:
+        return None
+
+    edition = "联想视角版" if with_insight else "普通版"
+    now_bj = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
+    text = (
+        "⚠️ AI 日报降级告警\n"
+        f"版本：{edition}\n"
+        f"时间：{now_bj}\n"
+        f"问题：{'；'.join(problems)}\n"
+        "影响：邮件已照常发出，但内容为英文原文，无翻译/摘要/分类。\n"
+        "常见原因：LLM API Key 失效、额度耗尽或中转站拦截。\n"
+        "排查：GET /api/jobs/debug/llm"
+    )
+    from lark_client import send_text_to_lark
+    logger.warning(f"Digest degraded — alerting Lark: {problems}")
+    return send_text_to_lark(LARK_WEBHOOK, text)
+
+
 def _require_job_token(authorization: str | None) -> None:
     """Raise 401/503 unless the Authorization header matches JOB_TOKEN."""
     if not JOB_TOKEN:
@@ -338,6 +399,15 @@ async def api_jobs_ai_news_digest(
     except Exception as e:
         logger.warning(f"Lark posting failed: {e}")
         lark_result = {"sent": False, "error": f"{type(e).__name__}: {e}"}
+
+    # Health self-check: if every LLM call failed, the digest silently degrades
+    # to raw RSS text (no translation, no summaries, no classification). That
+    # is easy to miss, so alert to Lark. Typical cause: expired/blocked API key
+    # or exhausted quota.
+    try:
+        _alert_lark_on_degraded(digest, with_insight)
+    except Exception as e:
+        logger.warning(f"Degradation alert failed: {e}")
 
     return {
         "dry_run": False,
