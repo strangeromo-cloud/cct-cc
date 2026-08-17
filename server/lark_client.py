@@ -87,14 +87,63 @@ def build_digest_card(digest: dict, title: str) -> dict:
     }
 
 
-def send_digest_to_lark(webhook: str, digest: dict, title: str) -> dict:
+def build_weekly_card(report: dict, title: str) -> dict:
     """
-    POST the digest card to the Lark webhook.
-    Returns {sent: bool, error: str | None}.
+    Build the Lark card for the weekly GitHub trending report.
+
+    Mirrors the weekly email: numbered repos ranked by stars gained this week,
+    each with its Chinese write-up.
     """
+    repos = report.get("repos", [])
+    elements: list[dict] = []
+
+    for i, r in enumerate(repos, start=1):
+        name = (r.get("full_name") or "").strip()
+        url = (r.get("html_url") or "").strip()
+        detail = (r.get("detail_zh") or r.get("description") or "").strip()
+        lang = (r.get("language") or "—").strip()
+        try:
+            wk = f"{int(r.get('stars_this_week') or 0):,}"
+        except (TypeError, ValueError):
+            wk = str(r.get("stars_this_week") or 0)
+
+        head = f"[{name}]({url})" if url else name
+        lines = [f"**{i}. {head}**", f"<font color='grey'>本周 +{wk}★ · {lang}</font>"]
+        if detail:
+            lines.append(detail)
+        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(lines)}})
+        elements.append({"tag": "hr"})
+
+    if elements and elements[-1].get("tag") == "hr":
+        elements.pop()  # drop trailing divider
+
+    if not elements:
+        elements = [{"tag": "div",
+                     "text": {"tag": "lark_md", "content": "本周暂无符合条件的 AI 项目。"}}]
+
+    elements.append({
+        "tag": "note",
+        "elements": [{"tag": "plain_text",
+                      "content": "CFO Control Tower · 数据源：github.com/trending · 排序：本周新增 star"}],
+    })
+
+    return {
+        "msg_type": "interactive",
+        "card": {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "template": "purple",
+                "title": {"tag": "plain_text", "content": title},
+            },
+            "elements": elements,
+        },
+    }
+
+
+def _post_card(webhook: str, payload: dict, what: str) -> dict:
+    """POST a card payload to Lark. Returns {sent: bool, error: str | None}."""
     if not webhook:
         return {"sent": False, "error": "LARK_WEBHOOK not configured"}
-    payload = build_digest_card(digest, title)
     try:
         r = requests.post(webhook, json=payload, timeout=20)
         r.raise_for_status()
@@ -102,11 +151,21 @@ def send_digest_to_lark(webhook: str, digest: dict, title: str) -> dict:
         # Lark returns {"code":0,...} on success; nonzero code = error.
         if isinstance(data, dict) and data.get("code") not in (0, None):
             return {"sent": False, "error": f"Lark API code={data.get('code')}: {data.get('msg')}"}
-        logger.info("Digest posted to Lark")
+        logger.info(f"{what} posted to Lark")
         return {"sent": True, "error": None}
     except Exception as e:
         logger.warning(f"Lark post failed: {type(e).__name__}: {e}")
         return {"sent": False, "error": f"{type(e).__name__}: {e}"}
+
+
+def send_digest_to_lark(webhook: str, digest: dict, title: str) -> dict:
+    """POST the daily digest card to the Lark webhook."""
+    return _post_card(webhook, build_digest_card(digest, title), "Digest")
+
+
+def send_weekly_to_lark(webhook: str, report: dict, title: str) -> dict:
+    """POST the weekly GitHub trending card to the Lark webhook."""
+    return _post_card(webhook, build_weekly_card(report, title), "GitHub weekly")
 
 
 def send_text_to_lark(webhook: str, text: str) -> dict:

@@ -430,6 +430,8 @@ async def api_jobs_github_weekly(
     limit: int = Query(5, ge=1, le=15, description="How many top repos to include"),
     dry_run: bool = Query(False, description="Build + return the report, do not email"),
     skip_enrich: bool = Query(False, description="Skip README fetch + LLM detail (faster preview)"),
+    skip_lark: bool = Query(False, description="Do not post to Lark even if LARK_WEBHOOK is set"),
+    no_email: bool = Query(False, description="Skip the email send — useful for Lark-only testing"),
 ):
     """
     Weekly GitHub AI trending report.
@@ -451,16 +453,35 @@ async def api_jobs_github_weekly(
     if dry_run:
         return {"dry_run": True, "report": report}
 
-    result = send_github_weekly(
-        report=report,
-        smtp_user=SMTP_USER,
-        smtp_password=SMTP_PASSWORD,
-        recipient=DIGEST_RECIPIENT,
-    )
+    if no_email:
+        # Lark-only test run: build everything, push to Lark, send no mail.
+        result = {"sent": False, "recipients": [], "error": None, "skipped": "no_email=true"}
+    else:
+        result = send_github_weekly(
+            report=report,
+            smtp_user=SMTP_USER,
+            smtp_password=SMTP_PASSWORD,
+            recipient=DIGEST_RECIPIENT,
+        )
+
+    # Also post to Lark when a webhook is configured. A Lark failure never
+    # affects the email result — email is the primary channel.
+    lark_result = {"sent": False, "error": "LARK_WEBHOOK not configured"}
+    try:
+        from config import LARK_WEBHOOK
+        if LARK_WEBHOOK and not skip_lark:
+            from lark_client import send_weekly_to_lark
+            card_title = f"GitHub AI 周报 · {report.get('week_label', '')}"
+            lark_result = send_weekly_to_lark(LARK_WEBHOOK, report, card_title)
+    except Exception as e:
+        logger.warning(f"Lark posting failed: {e}")
+        lark_result = {"sent": False, "error": f"{type(e).__name__}: {e}"}
+
     return {
         "dry_run": False,
         "week_label": report.get("week_label"),
         "repo_count": len(report.get("repos", [])),
+        "lark": lark_result,
         "email": result,
     }
 

@@ -7,6 +7,8 @@
 #   ./send-github-weekly.sh --dry-run       build + print, do NOT send
 #   ./send-github-weekly.sh --limit 8       include more repos (default 5)
 #   ./send-github-weekly.sh --skip-enrich   fast preview: skip README + LLM detail
+#   ./send-github-weekly.sh --no-email      push to Lark only, send NO email
+#   ./send-github-weekly.sh --skip-lark     send email only, do NOT post to Lark
 #   ./send-github-weekly.sh --help
 #
 # Credentials: JOB_TOKEN / BACKEND_URL from env, else server/.env, else default.
@@ -32,6 +34,8 @@ while [[ $# -gt 0 ]]; do
     --dry-run)     DRY_RUN=true; shift ;;
     --limit)       LIMIT="${2:?--limit needs a number}"; shift 2 ;;
     --skip-enrich) QS_EXTRA="${QS_EXTRA}&skip_enrich=true"; shift ;;
+    --no-email)    QS_EXTRA="${QS_EXTRA}&no_email=true"; shift ;;
+    --skip-lark)   QS_EXTRA="${QS_EXTRA}&skip_lark=true"; shift ;;
     -h|--help)
       cat <<'USAGE'
 Manually trigger the weekly GitHub AI trending report email.
@@ -41,6 +45,8 @@ Usage:
   ./send-github-weekly.sh --dry-run       build + print, do NOT send
   ./send-github-weekly.sh --limit 8       include more repos (default 5)
   ./send-github-weekly.sh --skip-enrich   fast preview: skip README + LLM detail
+  ./send-github-weekly.sh --no-email      push to Lark only, send NO email
+  ./send-github-weekly.sh --skip-lark     send email only, do NOT post to Lark
 
 Credentials: JOB_TOKEN / BACKEND_URL from env, else server/.env, else default.
 USAGE
