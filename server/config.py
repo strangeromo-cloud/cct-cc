@@ -54,3 +54,9 @@ def _flag(name: str, default: bool) -> bool:
 # each news item). Temporarily OFF. Set INCLUDE_LENOVO_INSIGHT=true in Zeabur
 # to re-enable without a code change.
 INCLUDE_LENOVO_INSIGHT = _flag("INCLUDE_LENOVO_INSIGHT", False)
+
+# Run the digest/weekly cron jobs inside this process (see scheduler.py).
+# GitHub Actions' schedule triggers were firing hours late, so scheduling now
+# lives in the always-on container. Set to "false" to fall back to external
+# triggering only.
+ENABLE_INTERNAL_SCHEDULER = _flag("ENABLE_INTERNAL_SCHEDULER", True)

@@ -21,3 +21,10 @@ trafilatura>=1.12.0
 # googlenewsdecoder resolves Google News' encrypted RSS URLs (news.google.com/
 # rss/articles/CBMi...) to the real publisher URL so we can fetch the article.
 googlenewsdecoder>=0.1.7
+
+# In-process cron scheduling for the daily digest / weekly report. GitHub
+# Actions' schedule triggers proved too unreliable (multi-hour delays).
+apscheduler>=3.10,<4
+# Guarantees IANA timezone data exists in the slim image, even though the
+# scheduler itself triggers in UTC.
+tzdata>=2024.1

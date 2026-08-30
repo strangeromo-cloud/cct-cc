@@ -49,6 +49,18 @@ app.add_middleware(
 )
 
 
+# ── Scheduling ───────────────────────────────────────────────────────
+# Cron lives in-process (see scheduler.py) because GitHub Actions' schedule
+# triggers were firing hours late. Startup must never fail because of it.
+@app.on_event("startup")
+async def _start_internal_scheduler():
+    try:
+        from scheduler import start_scheduler
+        start_scheduler()
+    except Exception as e:
+        logger.warning(f"Internal scheduler failed to start: {e}")
+
+
 # ── Health ───────────────────────────────────────────────────────────
 @app.get("/api/health")
 async def health():
@@ -484,6 +496,15 @@ async def api_jobs_github_weekly(
         "lark": lark_result,
         "email": result,
     }
+
+
+@app.get("/api/jobs/debug/scheduler")
+async def api_jobs_debug_scheduler(authorization: str | None = Header(default=None)):
+    """Report the in-process scheduler state and each job's next run time."""
+    _require_job_token(authorization)
+    from config import ENABLE_INTERNAL_SCHEDULER
+    from scheduler import scheduler_status
+    return {"enabled": ENABLE_INTERNAL_SCHEDULER, **scheduler_status()}
 
 
 @app.get("/api/jobs/debug/llm")

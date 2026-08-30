@@ -1,12 +1,10 @@
 name: Daily AI News Digest
 
 on:
-  schedule:
-    # 23:13 UTC = 07:13 Beijing (next day). Set early + off-peak odd minute:
-    # GitHub only delays (never fires early) and popular :00/:30 UTC slots are
-    # heavily backlogged, so an early odd-minute time absorbs the typical
-    # 1–2h scheduler delay and still lands around 08:30 Beijing.
-    - cron: '13 23 * * *'
+  # NOTE: the `schedule:` trigger was removed on 2026-08-29. GitHub's scheduled
+  # runs were firing 5-8 hours late (see git history), so cron now lives in the
+  # backend container — server/scheduler.py. This workflow is kept for manual
+  # runs and as a fallback if the internal scheduler is ever disabled.
   workflow_dispatch:
     inputs:
       hours:

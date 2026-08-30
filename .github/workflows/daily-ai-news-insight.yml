@@ -1,11 +1,10 @@
 name: Daily AI News Digest (联想视角)
 
 on:
-  schedule:
-    # 23:18 UTC = 07:18 Beijing (next day). Early + off-peak odd minute to
-    # absorb GitHub's scheduler delay; 5 min after the plain digest so two
-    # heavy LLM runs don't hit the backend simultaneously.
-    - cron: '18 23 * * *'
+  # NOTE: the `schedule:` trigger was removed on 2026-08-29. GitHub's scheduled
+  # runs were firing 5-8 hours late (see git history), so cron now lives in the
+  # backend container — server/scheduler.py. This workflow is kept for manual
+  # runs and as a fallback if the internal scheduler is ever disabled.
   workflow_dispatch:
     inputs:
       hours:
