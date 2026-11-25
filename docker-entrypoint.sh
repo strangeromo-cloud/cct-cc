@@ -2,6 +2,8 @@
 : "${MIGRATION_HTPASSWD:?Migration access must be configured}"
 umask 077
 printf "%s\n" "$MIGRATION_HTPASSWD" > /etc/nginx/migration.htpasswd
+chown root:nginx /etc/nginx/migration.htpasswd
+chmod 640 /etc/nginx/migration.htpasswd
 # Get K8s DNS resolver from /etc/resolv.conf
 NAMESERVER=$(grep nameserver /etc/resolv.conf | head -1 | awk '{print $2}')
 case "$NAMESERVER" in
