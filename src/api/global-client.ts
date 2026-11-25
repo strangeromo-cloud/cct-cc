@@ -1,7 +1,7 @@
 /**
  * Global View API Client — External environment data + news + AI summary.
  */
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'https://cct-backend.zeabur.app';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
