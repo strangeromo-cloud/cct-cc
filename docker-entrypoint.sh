@@ -4,6 +4,9 @@ umask 077
 printf "%s\n" "$MIGRATION_HTPASSWD" > /etc/nginx/migration.htpasswd
 # Get K8s DNS resolver from /etc/resolv.conf
 NAMESERVER=$(grep nameserver /etc/resolv.conf | head -1 | awk '{print $2}')
+case "$NAMESERVER" in
+    *:*) NAMESERVER="[$NAMESERVER]" ;;
+esac
 echo "Using DNS resolver: $NAMESERVER"
 
 # Substitute into nginx config
